@@ -51,7 +51,10 @@ declare module '@deepseek-ai/cordis' {
 export interface WebBootEntry {
   /** Entry name == package name. */
   id: string
-  /** Bundle endpoint, '/plugins/<id>/client.js?rev=<rev>'. */
+  /**
+   * Bundle source URL. Browser hosts use '/plugins/<id>/client.js?rev=<rev>'.
+   * Packaged hosts use a catalog-authorized local protocol URL.
+   */
   url: string
   /** Bundle content hash (cache-busting consistency anchor). */
   rev: string
@@ -79,7 +82,10 @@ export interface WebBootGraph {
 export interface BootModuleRow {
   /** Entry name == package name (module-table key). */
   id: string
-  /** Bundle endpoint, '/plugins/<id>/client.js?rev=<rev>'. */
+  /**
+   * Bundle source URL. Browser hosts use '/plugins/<id>/client.js?rev=<rev>'.
+   * Packaged hosts use a catalog-authorized local protocol URL.
+   */
   url: string
   /** Bundle content hash. */
   rev: string

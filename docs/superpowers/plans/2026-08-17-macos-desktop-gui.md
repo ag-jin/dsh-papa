@@ -27,7 +27,7 @@
 
 ## File Structure
 
-- Create: packages/client/modules/src/client/catalog.ts - creates a file-backed boot manifest from client rows and resolves an authorized bundle asset.
+- Create: packages/client/modules/src/catalog.ts - creates a host-only file-backed boot manifest from client rows and resolves an authorized bundle asset.
 - Modify: packages/client/modules/src/index.ts - exports the catalog provider without coupling it to the web server.
 - Modify: packages/client/modules/src/client/manifest.ts - documents local bundle URLs as an additional valid module source.
 - Create: packages/client/connection/src/client/desktop-bridge.ts - declares the renderer-safe preload bridge contract and DshWindow extension.
@@ -66,8 +66,8 @@
 - Create: packages/client/modules/src/client/catalog.ts
 - Modify: packages/client/modules/src/index.ts
 - Modify: packages/client/modules/src/client/manifest.ts
-- Test: packages/client/modules/tests/catalog.spec.ts
-- Test: packages/client/modules/tests/load-path.spec.ts
+- Test: packages/client/modules/tests/catalog.client.spec.ts
+- Test: packages/client/modules/tests/load-path.client.spec.ts
 
 **Consumes:** Existing dsh.client manifest rows and the current WebBootGraph wire format.
 
@@ -91,7 +91,7 @@ it('rejects an unknown package id or mismatched revision', () => {
 
 - [ ] **Step 2: Run the focused tests and confirm the missing catalog failure.**
 
-Run: pnpm exec vitest run packages/client/modules/tests/catalog.spec.ts
+Run: pnpm exec vitest run packages/client/modules/tests/catalog.client.spec.ts
 
 Expected: FAIL because createClientBundleCatalog is not exported.
 
@@ -120,9 +120,9 @@ Preserve existing browser URLs and HMR behavior. Add no Electron imports to pack
 
 - [ ] **Step 5: Run module tests and client build checks.**
 
-Run: pnpm exec vitest run packages/client/modules/tests/catalog.spec.ts packages/client/modules/tests/load-path.spec.ts
+Run: pnpm exec vitest run packages/client/modules/tests/catalog.client.spec.ts packages/client/modules/tests/load-path.client.spec.ts
 
-Run: pnpm run build:lib:host
+Run: pnpm exec tsc -p packages/client/modules/tsconfig.json --noEmit
 
 Expected: PASS.
 

@@ -21,7 +21,6 @@
  * @module @deepseek-ai/dsh-client-modules
  */
 
-import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -31,13 +30,16 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import { createClientBundleCatalog, shortHash, type ClientBundleCatalog, type ClientEntry } from './catalog.ts'
 import { optionalStringArray, stripClientSuffix } from './client/manifest.ts'
 import type { WebBootEntry, WebBootGraph } from './client/manifest.ts'
 
 export { stripClientSuffix } from './client/manifest.ts'
+export { createClientBundleCatalog } from './catalog.ts'
 export type {
   BootManifest, BootModuleRow, BootPluginRow, WebBootEntry, WebBootGraph,
 } from './client/manifest.ts'
+export type { ClientBundleCatalog, ClientEntry } from './catalog.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -156,11 +158,6 @@ function clientExportOf(pkgName: string, exportsField: unknown): string | undefi
     if (typeof fallback === 'string') return fallback
   }
   throw new Error(`client-modules: ${pkgName} exports["./client"] must be a string or an object with a string default`)
-}
-
-/** sha1 content hash shortened to 12 hex chars (bundle rev / graph rev). */
-function shortHash(input: string | Buffer): string {
-  return createHash('sha1').update(input).digest('hex').slice(0, 12)
 }
 
 /** Graph row for one bundle rev (url carries the rev as its cache-busting query). */
@@ -306,6 +303,7 @@ export class ClientModuleRegistry extends Service {
   private readonly resolvePkgJson: (spec: string) => string
   private flushQueued = false
   private composed: WebBootGraph
+  private bundleCatalog!: ClientBundleCatalog
 
   /**
    * Build the service: subscribe, seed, and run the activation flush.
@@ -368,6 +366,14 @@ export class ClientModuleRegistry extends Service {
   }
 
   /**
+   * Current host bundle authority for desktop protocol handlers.
+   * @returns the catalog for the active composed graph.
+   */
+  catalog(): ClientBundleCatalog {
+    return this.bundleCatalog
+  }
+
+  /**
    * Absolute path of an entry's client bundle.
    * @param id - entry id (package name).
    * @returns the path, or undefined for an unknown id.
@@ -424,8 +430,18 @@ export class ClientModuleRegistry extends Service {
   }
 
   private compose(): WebBootGraph {
-    const entries = orderByModuleGraph([...this.table.values()].map(record => record.entry))
-    return { rev: shortHash(JSON.stringify(entries)), entries }
+    const records = [...this.table.values()].map((record): ClientEntry => ({
+      ...record.entry,
+      clientPath: record.meta.clientPath,
+    }))
+    const ordered = orderByModuleGraph(records)
+    const byId = new Map(records.map(record => [record.id, record]))
+    this.bundleCatalog = createClientBundleCatalog(ordered.map((entry) => {
+      const record = byId.get(entry.id)
+      if (record === undefined) throw new Error(`client-modules: missing client bundle record for ${entry.id}`)
+      return { ...entry, clientPath: record.clientPath }
+    }))
+    return this.bundleCatalog.createBootGraph()
   }
 
   private notifyGraphChanged(): void {
