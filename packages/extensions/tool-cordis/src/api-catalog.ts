@@ -479,6 +479,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Absolute path of an authorized active client bundle.',
         parameters: [{ name: 'id', description: 'entry id (package name).' }],
         returns: 'the path, or undefined for an unknown id.',
+        throws: ['Error when the active bundle is stale or escapes its declaring package root.'],
       },
       {
         signature: 'rebuilt(id: string): string | undefined',
@@ -2856,7 +2857,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ClientBundleCatalog',
-    declaration: 'export interface ClientBundleCatalog {\n    createBootGraph(): WebBootGraph;\n    resolveBundle(id: string, rev: string): URL;\n    revisionFor(id: string): string;\n}',
+    declaration: 'export interface ClientBundleCatalog {\n    createBootGraph(): WebBootGraph;\n    resolveBundle(id: string, rev: string): URL;\n    resolveSourceMap(id: string, rev: string): URL;\n    revisionFor(id: string): string;\n}',
   },
   {
     name: 'ClientResponse',

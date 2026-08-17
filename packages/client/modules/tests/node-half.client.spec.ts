@@ -255,6 +255,18 @@ describe('client bundle activation', () => {
 
     const entry = service.graph().entries[0]
     if (entry === undefined) throw new Error('fixture graph entry is missing')
+    const externalMap = join(root!, 'outside-client.js.map')
+    writeFileSync(externalMap, '{\"sources\":[\"outside.ts\"]}\n')
+    rmSync(`${clientPath}.map`)
+    symlinkSync(externalMap, `${clientPath}.map`)
+    await route.handler({
+      method: 'GET',
+      url: `/plugins/${packageName}/client.js.map?rev=${entry.rev}`,
+    } as IncomingMessage, response)
+
+    expect(status).toBe(404)
+    expect(body).toBe('')
+
     writeFileSync(clientPath, 'module.exports = { changed: true }\n')
     await route.handler({
       method: 'GET',

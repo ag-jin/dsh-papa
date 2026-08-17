@@ -23,6 +23,8 @@ export interface ClientBundleCatalog {
   createBootGraph(): WebBootGraph
   /** Resolves an active bundle revision to its local file URL. */
   resolveBundle(id: string, rev: string): URL
+  /** Resolves an active bundle's source map after validating its containment. */
+  resolveSourceMap(id: string, rev: string): URL
   /** Returns the current content revision after package-root authorization. */
   revisionFor(id: string): string
 }
@@ -36,14 +38,18 @@ export function shortHash(input: string | Buffer): string {
   return createHash('sha1').update(input).digest('hex').slice(0, 12)
 }
 
-function authorizedClientPath(entry: Pick<ClientEntry, 'packageRoot' | 'clientPath'>): string {
-  const packageRoot = realpathSync(entry.packageRoot)
-  const clientPath = realpathSync(entry.clientPath)
-  const fromRoot = relative(packageRoot, clientPath)
+function authorizedPath(packageRootPath: string, assetPath: string): string {
+  const packageRoot = realpathSync(packageRootPath)
+  const resolvedPath = realpathSync(assetPath)
+  const fromRoot = relative(packageRoot, resolvedPath)
   if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
     throw new Error('client bundle escapes its declaring package root')
   }
-  return clientPath
+  return resolvedPath
+}
+
+function authorizedClientPath(entry: Pick<ClientEntry, 'packageRoot' | 'clientPath'>): string {
+  return authorizedPath(entry.packageRoot, entry.clientPath)
 }
 
 function currentRevision(entry: Pick<ClientEntry, 'packageRoot' | 'clientPath'>): string {
@@ -65,6 +71,12 @@ function resolveAuthorizedBundle(entry: ClientEntry, rev: string): URL {
     throw new Error('desktop bundle revision mismatch')
   }
   return pathToFileURL(authorizedClientPath(entry))
+}
+
+function resolveAuthorizedSourceMap(entry: ClientEntry, rev: string): URL {
+  const clientPath = authorizedClientPath(entry)
+  resolveAuthorizedBundle(entry, rev)
+  return pathToFileURL(authorizedPath(entry.packageRoot, `${clientPath}.map`))
 }
 
 function toBootEntry(entry: ClientEntry): WebBootEntry {
@@ -93,6 +105,11 @@ export function createClientBundleCatalog(entries: readonly ClientEntry[]): Clie
       const entry = byId.get(id)
       if (entry === undefined) throw new Error('desktop bundle is not in the active client graph')
       return resolveAuthorizedBundle(entry, rev)
+    },
+    resolveSourceMap(id, rev) {
+      const entry = byId.get(id)
+      if (entry === undefined) throw new Error('desktop bundle is not in the active client graph')
+      return resolveAuthorizedSourceMap(entry, rev)
     },
     revisionFor(id) {
       const entry = byId.get(id)

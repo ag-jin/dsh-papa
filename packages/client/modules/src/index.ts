@@ -590,9 +590,10 @@ export class ClientModuleRegistry extends Service {
       return
     }
     try {
-      const bundle = this.catalog().resolveBundle(id, rev)
-      const path = isSourceMap ? `${fileURLToPath(bundle)}.map` : fileURLToPath(bundle)
-      const body = await readFile(path)
+      const asset = isSourceMap
+        ? this.catalog().resolveSourceMap(id, rev)
+        : this.catalog().resolveBundle(id, rev)
+      const body = await readFile(asset)
       res.writeHead(200, {
         'content-type': isSourceMap ? 'application/json; charset=utf-8' : 'text/javascript; charset=utf-8',
         'cache-control': 'no-cache',

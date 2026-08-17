@@ -55,6 +55,21 @@ describe('createClientBundleCatalog', () => {
       .toThrow('client bundle escapes its declaring package root')
   })
 
+  it('rejects a source map symlink that escapes its declaring package root', () => {
+    const entry = writeClientEntry()
+    const mapPath = `${entry.clientPath}.map`
+    writeFileSync(mapPath, '{\"version\":3}\n')
+    const catalog = createClientBundleCatalog([entry])
+
+    expect(catalog.resolveSourceMap(entry.id, BUNDLE_V1_REV).protocol).toBe('file:')
+    const external = join(root!, 'outside-client.js.map')
+    writeFileSync(external, '{\"version\":3,\"sources\":[\"outside.ts\"]}\n')
+    rmSync(mapPath)
+    symlinkSync(external, mapPath)
+    expect(() => catalog.resolveSourceMap(entry.id, BUNDLE_V1_REV))
+      .toThrow('client bundle escapes its declaring package root')
+  })
+
   it('rejects an active bundle whose contents no longer match its revision', () => {
     const entry = writeClientEntry()
     const catalog = createClientBundleCatalog([entry])
