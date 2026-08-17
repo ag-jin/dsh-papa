@@ -4,11 +4,15 @@
  * @module @deepseek-ai/dsh-client-modules/src/catalog
  */
 import { createHash } from 'node:crypto'
+import { readFileSync, realpathSync } from 'node:fs'
+import { isAbsolute, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { WebBootEntry, WebBootGraph } from './client/manifest.ts'
 
 /** One active client bundle with its browser graph entry and host path. */
 export interface ClientEntry extends WebBootEntry {
+  /** Package root that declared the client bundle. */
+  packageRoot: string
   /** Absolute path of the built client bundle. */
   clientPath: string
 }
@@ -19,11 +23,48 @@ export interface ClientBundleCatalog {
   createBootGraph(): WebBootGraph
   /** Resolves an active bundle revision to its local file URL. */
   resolveBundle(id: string, rev: string): URL
+  /** Returns the current content revision after package-root authorization. */
+  revisionFor(id: string): string
 }
 
-/** Computes the short content revisions used by client bundles and graphs. */
+/**
+ * Computes the short content revisions used by client bundles and graphs.
+ * @param input - bundle bytes or graph serialization to hash.
+ * @returns the first twelve hexadecimal SHA-1 characters.
+ */
 export function shortHash(input: string | Buffer): string {
   return createHash('sha1').update(input).digest('hex').slice(0, 12)
+}
+
+function authorizedClientPath(entry: Pick<ClientEntry, 'packageRoot' | 'clientPath'>): string {
+  const packageRoot = realpathSync(entry.packageRoot)
+  const clientPath = realpathSync(entry.clientPath)
+  const fromRoot = relative(packageRoot, clientPath)
+  if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error('client bundle escapes its declaring package root')
+  }
+  return clientPath
+}
+
+function currentRevision(entry: Pick<ClientEntry, 'packageRoot' | 'clientPath'>): string {
+  return shortHash(readFileSync(authorizedClientPath(entry)))
+}
+
+/**
+ * Returns the current bundle revision after validating its declaring package root.
+ * @param packageRoot - package root that declared the bundle.
+ * @param clientPath - declared built client bundle path.
+ * @returns the current short content revision.
+ */
+export function clientBundleRevision(packageRoot: string, clientPath: string): string {
+  return currentRevision({ packageRoot, clientPath })
+}
+
+function resolveAuthorizedBundle(entry: ClientEntry, rev: string): URL {
+  if (entry.rev !== rev || currentRevision(entry) !== rev) {
+    throw new Error('desktop bundle revision mismatch')
+  }
+  return pathToFileURL(authorizedClientPath(entry))
 }
 
 function toBootEntry(entry: ClientEntry): WebBootEntry {
@@ -37,7 +78,11 @@ function toBootEntry(entry: ClientEntry): WebBootEntry {
   }
 }
 
-/** Creates a catalog from entries already authorized by ClientModuleRegistry. */
+/**
+ * Creates a catalog from client bundle entries declared by ClientModuleRegistry.
+ * @param entries - active package bundle rows with their declaring roots.
+ * @returns the browser graph and host bundle authorization operations.
+ */
 export function createClientBundleCatalog(entries: readonly ClientEntry[]): ClientBundleCatalog {
   const byId = new Map(entries.map(entry => [entry.id, entry]))
   const bootEntries = entries.map(toBootEntry)
@@ -47,8 +92,12 @@ export function createClientBundleCatalog(entries: readonly ClientEntry[]): Clie
     resolveBundle(id, rev) {
       const entry = byId.get(id)
       if (entry === undefined) throw new Error('desktop bundle is not in the active client graph')
-      if (entry.rev !== rev) throw new Error('desktop bundle revision mismatch')
-      return pathToFileURL(entry.clientPath)
+      return resolveAuthorizedBundle(entry, rev)
+    },
+    revisionFor(id) {
+      const entry = byId.get(id)
+      if (entry === undefined) throw new Error('desktop bundle is not in the active client graph')
+      return currentRevision(entry)
     },
   }
 }

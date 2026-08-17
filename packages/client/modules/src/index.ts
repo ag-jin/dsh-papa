@@ -26,16 +26,17 @@ import { readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import { createClientBundleCatalog, shortHash, type ClientBundleCatalog, type ClientEntry } from './catalog.ts'
+import { clientBundleRevision, createClientBundleCatalog, type ClientBundleCatalog, type ClientEntry } from './catalog.ts'
 import { optionalStringArray, stripClientSuffix } from './client/manifest.ts'
 import type { WebBootEntry, WebBootGraph } from './client/manifest.ts'
 
 export { stripClientSuffix } from './client/manifest.ts'
-export { createClientBundleCatalog } from './catalog.ts'
+export { clientBundleRevision, createClientBundleCatalog } from './catalog.ts'
 export type {
   BootManifest, BootModuleRow, BootPluginRow, WebBootEntry, WebBootGraph,
 } from './client/manifest.ts'
@@ -74,6 +75,7 @@ interface WebBootRowFields {
 
 /** Resolved package metadata for one `dsh.client` package (cached per name, never expires). */
 interface PkgMeta extends WebBootRowFields {
+  packageRoot: string
   clientPath: string
 }
 
@@ -374,12 +376,13 @@ export class ClientModuleRegistry extends Service {
   }
 
   /**
-   * Absolute path of an entry's client bundle.
+   * Absolute path of an authorized active client bundle.
    * @param id - entry id (package name).
    * @returns the path, or undefined for an unknown id.
    */
   clientPath(id: string): string | undefined {
-    return this.table.get(id)?.meta.clientPath
+    const entry = this.composed.entries.find(candidate => candidate.id === id)
+    return entry === undefined ? undefined : fileURLToPath(this.catalog().resolveBundle(id, entry.rev))
   }
 
   /**
@@ -391,7 +394,7 @@ export class ClientModuleRegistry extends Service {
   rebuilt(id: string): string | undefined {
     const record = this.table.get(id)
     if (record === undefined) return undefined
-    const rev = shortHash(readFileSync(record.meta.clientPath))
+    const rev = this.catalog().revisionFor(id)
     if (rev === record.entry.rev) return rev
     record.entry = graphRow(id, rev, record.meta)
     this.composed = this.compose()
@@ -432,6 +435,7 @@ export class ClientModuleRegistry extends Service {
   private compose(): WebBootGraph {
     const records = [...this.table.values()].map((record): ClientEntry => ({
       ...record.entry,
+      packageRoot: record.meta.packageRoot,
       clientPath: record.meta.clientPath,
     }))
     const ordered = orderByModuleGraph(records)
@@ -439,7 +443,7 @@ export class ClientModuleRegistry extends Service {
     this.bundleCatalog = createClientBundleCatalog(ordered.map((entry) => {
       const record = byId.get(entry.id)
       if (record === undefined) throw new Error(`client-modules: missing client bundle record for ${entry.id}`)
-      return { ...entry, clientPath: record.clientPath }
+      return { ...entry, packageRoot: record.packageRoot, clientPath: record.clientPath }
     }))
     return this.bundleCatalog.createBootGraph()
   }
@@ -482,8 +486,10 @@ export class ClientModuleRegistry extends Service {
     if (clientRel === undefined) {
       throw new Error(`client-modules: ${pkgName} declares dsh.client but exports no "./client" bundle`)
     }
+    const packageRoot = dirname(pkgPath)
     const meta: PkgMeta = {
-      clientPath: join(dirname(pkgPath), clientRel),
+      packageRoot,
+      clientPath: join(packageRoot, clientRel),
       ...(decl.inject !== undefined ? { inject: decl.inject } : {}),
       external: decl.external ?? [],
       immediately: decl.immediately === true,
@@ -495,13 +501,14 @@ export class ClientModuleRegistry extends Service {
   /**
    * Read the activation-time bundle revision.
    * @param pkgName - package that declares the client bundle.
+   * @param packageRoot - package root that declared the client artifact.
    * @param clientPath - absolute path of the built client artifact.
    * @returns the bundle content's short hash for use as its revision.
    * @throws {MissingClientBundleError} when the read fails with `ENOENT`; other filesystem errors are rethrown unchanged.
    */
-  private initialBundleRevision(pkgName: string, clientPath: string): string {
+  private initialBundleRevision(pkgName: string, packageRoot: string, clientPath: string): string {
     try {
-      return shortHash(readFileSync(clientPath))
+      return clientBundleRevision(packageRoot, clientPath)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       throw new MissingClientBundleError(pkgName, clientPath, error)
@@ -523,7 +530,7 @@ export class ClientModuleRegistry extends Service {
     if (meta === null) return false
     // The rev rides the row from here on: a fiber restart reuses the row (and
     // its rev) untouched; only rebuilt() re-reads the bundle.
-    const rev = this.initialBundleRevision(entryName, meta.clientPath)
+    const rev = this.initialBundleRevision(entryName, meta.packageRoot, meta.clientPath)
     this.table.set(entryName, { entry: graphRow(entryName, rev, meta), meta })
     return true
   }
@@ -563,7 +570,8 @@ export class ClientModuleRegistry extends Service {
       return
     }
     /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server requests. */
-    const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)
+    const requestUrl = new URL(req.url ?? '/', 'http://x')
+    const pathname = decodeURIComponent(requestUrl.pathname)
     // The id may contain a scope slash. Anything else under /plugins (including
     // /plugins/events when the HMR row is absent) is an unknown resource.
     const prefix = '/plugins/'
@@ -571,16 +579,19 @@ export class ClientModuleRegistry extends Service {
     const bundleSuffix = '/client.js'
     const isSourceMap = pathname.startsWith(prefix) && pathname.endsWith(mapSuffix)
     const suffix = isSourceMap ? mapSuffix : bundleSuffix
-    const clientPath = pathname.startsWith(prefix) && pathname.endsWith(suffix)
-      ? this.clientPath(pathname.slice(prefix.length, -suffix.length))
+    const id = pathname.startsWith(prefix) && pathname.endsWith(suffix)
+      ? pathname.slice(prefix.length, -suffix.length)
       : undefined
-    const path = clientPath === undefined ? undefined : `${clientPath}${isSourceMap ? '.map' : ''}`
-    if (path === undefined) {
+    const entry = id === undefined ? undefined : this.composed.entries.find(candidate => candidate.id === id)
+    const rev = requestUrl.searchParams.get('rev') ?? entry?.rev
+    if (id === undefined || rev === undefined) {
       res.writeHead(404)
       res.end()
       return
     }
     try {
+      const bundle = this.catalog().resolveBundle(id, rev)
+      const path = isSourceMap ? `${fileURLToPath(bundle)}.map` : fileURLToPath(bundle)
       const body = await readFile(path)
       res.writeHead(200, {
         'content-type': isSourceMap ? 'application/json; charset=utf-8' : 'text/javascript; charset=utf-8',

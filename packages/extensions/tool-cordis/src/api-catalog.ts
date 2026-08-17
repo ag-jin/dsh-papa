@@ -469,8 +469,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the graph served as `window.__DSH_BOOT__`.',
       },
       {
+        signature: 'catalog(): ClientBundleCatalog',
+        description: 'Current host bundle authority for desktop protocol handlers.',
+        parameters: [],
+        returns: 'the catalog for the active composed graph.',
+      },
+      {
         signature: 'clientPath(id: string): string | undefined',
-        description: 'Absolute path of an entry\'s client bundle.',
+        description: 'Absolute path of an authorized active client bundle.',
         parameters: [{ name: 'id', description: 'entry id (package name).' }],
         returns: 'the path, or undefined for an unknown id.',
       },
@@ -2847,6 +2853,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CancelOptions',
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
+  },
+  {
+    name: 'ClientBundleCatalog',
+    declaration: 'export interface ClientBundleCatalog {\n    createBootGraph(): WebBootGraph;\n    resolveBundle(id: string, rev: string): URL;\n    revisionFor(id: string): string;\n}',
   },
   {
     name: 'ClientResponse',

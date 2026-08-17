@@ -1,6 +1,6 @@
 /** Node-half composition diagnostics for package metadata and built client bundles. */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -175,6 +175,18 @@ describe('client bundle activation', () => {
     expect(construct([currentName]).graph().entries.map(entry => entry.id)).toEqual([currentName])
   })
 
+  it('rejects initial composition when a client export escapes its declaring package root', () => {
+    const packageName = '@fixture/initial-escape'
+    const clientPath = writePackage(packageName)
+    const external = join(root!, 'outside-client.js')
+    writeFileSync(external, 'module.exports = { escaped: true }\n')
+    mkdirSync(dirname(clientPath), { recursive: true })
+    symlinkSync(external, clientPath)
+
+    expect(() => construct([packageName]))
+      .toThrow('client bundle escapes its declaring package root')
+  })
+
   it('groups missing bundles under one source-build instruction with a package/path list', () => {
     const firstName = '@fixture/missing-first'
     const secondName = '@fixture/missing-second'
@@ -213,7 +225,7 @@ describe('client bundle activation', () => {
     writeFileSync(clientPath, 'module.exports = {}\n')
     const map = '{"version":3,"sources":["src/client/index.tsx"]}\n'
     writeFileSync(`${clientPath}.map`, map)
-    const { route } = constructWithRoute([packageName])
+    const { service, route } = constructWithRoute([packageName])
     let status = 0
     let headers: Record<string, string> | undefined
     let body = ''
@@ -240,6 +252,47 @@ describe('client bundle activation', () => {
       'cache-control': 'no-cache',
     })
     expect(body).toBe(map)
+
+    const entry = service.graph().entries[0]
+    if (entry === undefined) throw new Error('fixture graph entry is missing')
+    writeFileSync(clientPath, 'module.exports = { changed: true }\n')
+    await route.handler({
+      method: 'GET',
+      url: `/plugins/${packageName}/client.js.map?rev=${entry.rev}`,
+    } as IncomingMessage, response)
+
+    expect(status).toBe(404)
+    expect(body).toBe('')
+  })
+
+  it('rejects an HMR rebuild whose bundle escapes its declaring package root', () => {
+    const packageName = '@fixture/hmr-escape'
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+    const service = construct([packageName])
+    const external = join(root!, 'outside-client.js')
+    writeFileSync(external, 'module.exports = { escaped: true }\n')
+    rmSync(clientPath)
+    symlinkSync(external, clientPath)
+
+    expect(() => service.rebuilt(packageName))
+      .toThrow('client bundle escapes its declaring package root')
+  })
+
+  it('exposes a catalog that rejects a bundle changed after graph composition', () => {
+    const packageName = '@fixture/catalog-authority'
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+    const service = construct([packageName])
+    const entry = service.graph().entries[0]
+    if (entry === undefined) throw new Error('fixture graph entry is missing')
+
+    expect(service.catalog().resolveBundle(packageName, entry.rev)).toEqual(pathToFileURL(realpathSync(clientPath)))
+    writeFileSync(clientPath, 'module.exports = { changed: true }\n')
+    expect(() => service.catalog().resolveBundle(packageName, entry.rev))
+      .toThrow('desktop bundle revision mismatch')
   })
 })
 

@@ -63,7 +63,7 @@
 ### Task 1: Extract a file-backed client bundle catalog
 
 **Files:**
-- Create: packages/client/modules/src/client/catalog.ts
+- Create: packages/client/modules/src/catalog.ts
 - Modify: packages/client/modules/src/index.ts
 - Modify: packages/client/modules/src/client/manifest.ts
 - Test: packages/client/modules/tests/catalog.client.spec.ts
