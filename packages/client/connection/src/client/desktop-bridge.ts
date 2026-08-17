@@ -3,15 +3,15 @@
  * cross this boundary as JSON-compatible wire data only; the interface must
  * not import Electron, Node, fs, or callback-bearing main-process modules.
  */
-import type { ClientRequest, ClientResponse, ServerResponse } from './api.ts'
+import type { ClientRequest, ClientResponse, RpcReceipt, ServerResponse } from './api.ts'
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 
 /** One full client-origin RPC envelope the bridge forwards verbatim. */
 export type DesktopRequest = ClientRequest | ClientResponse
 
-/** One full server-origin RPC envelope returned by the bridge. */
-export type DesktopResponse = ServerResponse
+/** One server-origin RPC envelope or client-response carrier receipt returned by the bridge. */
+export type DesktopResponse = ServerResponse | RpcReceipt
 
 /** Native command payload for desktop main-process features Tasks 4/6 own. */
 export interface DesktopCommand {
@@ -44,6 +44,11 @@ export type DesktopEventKind = 'mux' | 'host'
 export interface DesktopBridge {
   /** Send one client-origin RPC envelope through the preload bridge. */
   request(request: DesktopRequest): Promise<DesktopResponse>
+  /**
+   * Signals cancellation for an active request without exposing AbortSignal across preload.
+   * @param rpcId - JSON-safe request correlation id to cancel.
+   */
+  cancel(rpcId: string): void
   /**
    * Subscribe to a server-push RPC stream. The listener receives parsed JSON
    * server requests; onClose terminates the subscription from the host side.

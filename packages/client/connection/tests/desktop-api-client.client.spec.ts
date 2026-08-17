@@ -20,6 +20,8 @@ import type {
 
 const SID = 'mk-desktop' as SessionId
 
+void ({ accepted: true } satisfies Awaited<ReturnType<DesktopBridge['request']>>)
+
 function rpcOk<T>(rpcId: string, value: T): ServerResponse<T> {
   return { type: 'server-response', rpcId: RpcId(rpcId), result: { ok: true, value } }
 }
@@ -35,18 +37,22 @@ function serverRequest(
 type SubscriptionKey = 'mux' | 'host'
 type Listener = (message: unknown) => void
 
-function fakeDesktopBridge(options: { response?: ServerResponse<unknown> } = {}): DesktopBridge & {
+function fakeDesktopBridge(options: { response?: Awaited<ReturnType<DesktopBridge['request']>> } = {}): DesktopBridge & {
   requests: DesktopRequest[]
+  cancellations: string[]
+  cancel: (rpcId: string) => void
   close: (kind: SubscriptionKey) => void
   emit: (kind: SubscriptionKey, message: unknown) => void
   listeners: { mux?: Listener; host?: Listener }
 } {
   const requests: DesktopRequest[] = []
+  const cancellations: string[] = []
   const listeners: { mux?: Listener; host?: Listener } = {}
   const onClose: { mux?: () => void; host?: () => void } = {}
 
   return {
     requests,
+    cancellations,
     listeners,
     request: async (request) => {
       requests.push(request)
@@ -57,6 +63,7 @@ function fakeDesktopBridge(options: { response?: ServerResponse<unknown> } = {})
         result: { ok: false, error: { code: 'internal' as const, message: 'no response configured', details: {} } },
       }
     },
+    cancel: (rpcId) => { cancellations.push(rpcId) },
     subscribe: (kind, listener, close) => {
       listeners[kind] = listener
       onClose[kind] = close
@@ -85,6 +92,29 @@ describe('DesktopApiClient', () => {
     const result = await client.host.describe({})
     expect(result).toMatchObject({ result: { ok: true, value: { canOpenPath: true } } })
     expect(bridge.requests).toHaveLength(1)
+  })
+
+  it('cancels an active unary bridge request when aborted', async () => {
+    const bridge = fakeDesktopBridge()
+    const client = new DesktopApiClient(bridge)
+    const abort = new AbortController()
+    const pending = client.host.describe({}, abort.signal)
+
+    abort.abort()
+
+    await expect(pending).rejects.toThrow('This operation was aborted')
+    expect(bridge.cancellations).toEqual([String(bridge.requests[0]?.rpcId)])
+  })
+
+  it('returns a client-response carrier receipt through the desktop bridge', async () => {
+    const bridge = fakeDesktopBridge({ response: { accepted: true } })
+    const client = new DesktopApiClient(bridge)
+
+    await expect(client.respond({
+      type: 'client-response',
+      rpcId: RpcId('desktop-server-request'),
+      result: { ok: true, value: null },
+    })).resolves.toEqual({ accepted: true })
   })
 
   it('delivers accepted downlink frames in order across mux and host and calls the envelope tap', async () => {

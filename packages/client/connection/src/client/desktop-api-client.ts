@@ -21,7 +21,10 @@ export class DesktopApiClient extends AbstractApiClient {
     const signal = init.signal
     if (signal?.aborted) return Promise.reject(abortError(signal))
     return new Promise((resolve, reject) => {
-      const onAbort = (): void => { reject(abortError(signal)) }
+      const onAbort = (): void => {
+        this.bridge.cancel(String(message.rpcId))
+        reject(abortError(signal))
+      }
       signal?.addEventListener('abort', onAbort, { once: true })
       this.bridge.request(message).then(
         (response) => {
@@ -46,7 +49,7 @@ export class DesktopApiClient extends AbstractApiClient {
    * @param onOpen - optional readiness callback invoked after subscription.
    * @returns an async iterable of validated mux request envelopes.
    */
-  override openMux(
+  protected override openMux(
     _payload: Parameters<AbstractApiClient['events']['mux']>[0]['payload'],
     signal: AbortSignal,
     onOpen?: () => void,
@@ -61,7 +64,7 @@ export class DesktopApiClient extends AbstractApiClient {
    * @param onOpen - optional readiness callback invoked after subscription.
    * @returns an async iterable of validated host request envelopes.
    */
-  override openHost(
+  protected override openHost(
     _payload: Parameters<AbstractApiClient['events']['host']>[0]['payload'],
     signal: AbortSignal,
     onOpen?: () => void,
