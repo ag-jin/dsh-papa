@@ -7,6 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { HostDescription, IApiClient } from './api.ts'
 import { ConnectionController, type ConnectionConfig, type ConnectionSinks, type ConnectionState } from './connection.ts'
 import { FixtureApiClient } from './fixture.ts'
+import { DesktopApiClient } from './desktop-api-client.ts'
 import { WebApiClient } from './web-api-client.ts'
 import { createWebConnectionRpc } from './rpc.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
@@ -85,7 +86,8 @@ export function apply(ctx: Context): void {
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const fixture = pageLocation !== undefined && new URLSearchParams(pageLocation.search).has('fixture')
   const fixtureClient = fixture ? new FixtureApiClient() : undefined
-  const api: IApiClient = fixtureClient ?? new WebApiClient()
+  const desktopBridge = (globalThis as { __DSH_DESKTOP__?: import('./desktop-bridge.ts').DesktopBridge }).__DSH_DESKTOP__
+  const api: IApiClient = fixtureClient ?? (desktopBridge === undefined ? new WebApiClient() : new DesktopApiClient(desktopBridge))
   const rpc = fixtureClient?.rpc ?? createWebConnectionRpc()
   let started = false
   let description: HostDescription | undefined
@@ -103,7 +105,7 @@ export function apply(ctx: Context): void {
   }
   const handle: ConnectionHandle = {
     api,
-    isLoopback: pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    isLoopback: desktopBridge !== undefined || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
     hostDescription: {
       getSnapshot: () => description,
       subscribe: (listener) => {
