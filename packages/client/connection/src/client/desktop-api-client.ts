@@ -1,6 +1,6 @@
 /** DesktopApiClient: renderer-safe bridge carrier using global DesktopBridge. */
 
-import type { HostFrame, MuxFrame, RpcRequest, ServerRequest } from './api.ts'
+import type { ApiProxy, HostFrame, MuxFrame, RpcRequest, ServerRequest } from './api.ts'
 import { AbstractApiClient } from './api.ts'
 import type { DesktopBridge, DesktopRequest } from './desktop-bridge.ts'
 import { hostFrameSchema, muxFrameSchema } from '@deepseek-ai/dsh-host-apiproxy/api/events.schema'
@@ -19,7 +19,7 @@ export class DesktopApiClient extends AbstractApiClient {
     }
     const message = JSON.parse(init.body) as DesktopRequest
     const signal = init.signal
-    if (signal?.aborted) return Promise.reject(abortError(signal))
+    if (signal !== null && signal !== undefined && signal.aborted) return Promise.reject(abortError(signal))
     return new Promise((resolve, reject) => {
       const onAbort = (): void => {
         this.bridge.cancel(String(message.rpcId))
@@ -50,7 +50,7 @@ export class DesktopApiClient extends AbstractApiClient {
    * @returns an async iterable of validated mux request envelopes.
    */
   protected override openMux(
-    _payload: Parameters<AbstractApiClient['events']['mux']>[0]['payload'],
+    _payload: Parameters<ApiProxy['events']['mux']>[0]['payload'],
     signal: AbortSignal,
     onOpen?: () => void,
   ): AsyncIterable<RpcRequest<MuxFrame>> {
@@ -65,7 +65,7 @@ export class DesktopApiClient extends AbstractApiClient {
    * @returns an async iterable of validated host request envelopes.
    */
   protected override openHost(
-    _payload: Parameters<AbstractApiClient['events']['host']>[0]['payload'],
+    _payload: Parameters<ApiProxy['events']['host']>[0]['payload'],
     signal: AbortSignal,
     onOpen?: () => void,
   ): AsyncIterable<RpcRequest<HostFrame>> {
@@ -133,8 +133,8 @@ export class DesktopApiClient extends AbstractApiClient {
 }
 
 /** Mirror fetch's abort rejection: the signal's reason when present, else an AbortError. */
-function abortError(signal: AbortSignal): Error {
-  const reason: unknown = signal.reason
+function abortError(signal: AbortSignal | null | undefined): Error {
+  const reason: unknown = signal?.reason
   if (reason instanceof Error) return reason
   if (typeof reason === 'string') return new Error(reason)
   return new Error('This operation was aborted')

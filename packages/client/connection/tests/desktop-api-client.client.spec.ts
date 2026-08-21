@@ -22,7 +22,7 @@ const SID = 'mk-desktop' as SessionId
 
 void ({ accepted: true } satisfies Awaited<ReturnType<DesktopBridge['request']>>)
 
-function rpcOk<T>(rpcId: string, value: T): ServerResponse<T> {
+function rpcOk(rpcId: string, value: unknown): ServerResponse {
   return { type: 'server-response', rpcId: RpcId(rpcId), result: { ok: true, value } }
 }
 
@@ -43,12 +43,12 @@ function fakeDesktopBridge(options: { response?: Awaited<ReturnType<DesktopBridg
   cancel: (rpcId: string) => void
   close: (kind: SubscriptionKey) => void
   emit: (kind: SubscriptionKey, message: unknown) => void
-  listeners: { mux?: Listener; host?: Listener }
+  listeners: { mux?: Listener | undefined; host?: Listener | undefined }
 } {
   const requests: DesktopRequest[] = []
   const cancellations: string[] = []
-  const listeners: { mux?: Listener; host?: Listener } = {}
-  const onClose: { mux?: () => void; host?: () => void } = {}
+  const listeners: { mux?: Listener | undefined; host?: Listener | undefined } = {}
+  const onClose: { mux?: (() => void) | undefined; host?: (() => void) | undefined } = {}
 
   return {
     requests,
@@ -69,11 +69,18 @@ function fakeDesktopBridge(options: { response?: Awaited<ReturnType<DesktopBridg
       onClose[kind] = close
       return () => {
         onClose[kind]?.()
-        listeners[kind] = undefined
+        if (kind === 'mux') listeners.mux = undefined
+        else listeners.host = undefined
       }
     },
     sendCommand: async () => undefined,
-    getWindowState: async () => ({ width: 1200, height: 800 }),
+    getWindowState: async () => ({
+      bounds: { x: 0, y: 0, width: 1200, height: 800 },
+      sourceListVisible: true,
+      inspectorVisible: false,
+      sourceListWidth: 280,
+      inspectorWidth: 420,
+    }),
     setWindowState: async () => undefined,
     close: (kind) => { onClose[kind]?.() },
     emit: (kind, message) => { listeners[kind]?.(message) },
@@ -86,7 +93,7 @@ function subscribedFrame(lastSeq = 0): MuxFrame {
 
 describe('DesktopApiClient', () => {
   it('sends unary calls through the desktop bridge without a network request', async () => {
-    const response = rpcOk('ignored', { version: '0', cwd: '/f', attachedSessions: 0, canOpenPath: true })
+    const response = rpcOk('ignored', { version: '0', cwd: '/f', attachedSessions: 0, home: '/h', canOpenPath: true })
     const bridge = fakeDesktopBridge({ response })
     const client = new DesktopApiClient(bridge)
     const result = await client.host.describe({})

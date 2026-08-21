@@ -43,8 +43,8 @@ function assertImageBodyCapacity(ctx: Context, maxRequestBodyBytes: number): voi
   }
 }
 
-/** Services required before providing Connection; API Proxy is an optional `/api` fallback. */
-export const inject = ['webServer']
+/** Connection core composes without a listener; browser transport activates when WebServer appears. */
+export const inject: string[] = []
 
 /** Plugin config: the deployment's non-loopback serving authorities. */
 export interface ConnectionConfig {
@@ -170,27 +170,31 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
       await bridge(req, res, fetchHandler, maxRequestBodyBytes)
     },
   }
-  ctx.effect(() => ctx.webServer.register(route), 'client-connection: /api route')
-  ctx.inject(['apiProxy'], (apiCtx) => {
-    assertImageBodyCapacity(apiCtx, maxRequestBodyBytes)
-    const downlinks = new WebSocketDownlinks(apiCtx.apiProxy)
-    const registerDownlink = (
-      path: string,
-      handle: WebUpgradeRoute['handler'],
-    ): void => {
-      apiCtx.effect(() => apiCtx.webServer.registerUpgrade({
-        path,
-        handler: (req, socket, head) => {
-          if (!isTrustedApiRequest(req, trustedHosts)) {
-            rejectWebSocketUpgrade(socket)
-            return
-          }
-          return handle(req, socket, head)
-        },
-      }), `client-connection: ${path} WebSocket`)
-    }
-    apiCtx.effect(() => () => downlinks.close(), 'client-connection: WebSocket downlinks')
-    registerDownlink(MUX_EVENTS_PATH, (req, socket, head) => { downlinks.handleMux(req, socket, head) })
-    registerDownlink(HOST_EVENTS_PATH, (req, socket, head) => { downlinks.handleHost(req, socket, head) })
-  })
+  const installWebTransport = (webCtx: Context): void => {
+    webCtx.effect(() => webCtx.webServer.register(route), 'client-connection: /api route')
+    webCtx.inject(['apiProxy'], (apiCtx) => {
+      assertImageBodyCapacity(apiCtx, maxRequestBodyBytes)
+      const downlinks = new WebSocketDownlinks(apiCtx.apiProxy)
+      const registerDownlink = (
+        path: string,
+        handle: WebUpgradeRoute['handler'],
+      ): void => {
+        apiCtx.effect(() => apiCtx.webServer.registerUpgrade({
+          path,
+          handler: (req, socket, head) => {
+            if (!isTrustedApiRequest(req, trustedHosts)) {
+              rejectWebSocketUpgrade(socket)
+              return
+            }
+            return handle(req, socket, head)
+          },
+        }), `client-connection: ${path} WebSocket`)
+      }
+      apiCtx.effect(() => () => downlinks.close(), 'client-connection: WebSocket downlinks')
+      registerDownlink(MUX_EVENTS_PATH, (req, socket, head) => { downlinks.handleMux(req, socket, head) })
+      registerDownlink(HOST_EVENTS_PATH, (req, socket, head) => { downlinks.handleHost(req, socket, head) })
+    })
+  }
+  if (ctx.get('webServer') !== undefined) installWebTransport(ctx)
+  else ctx.inject(['webServer'], installWebTransport)
 }

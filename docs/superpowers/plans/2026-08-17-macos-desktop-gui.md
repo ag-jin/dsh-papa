@@ -1,8 +1,10 @@
 # macOS Desktop GUI Implementation Plan
 
+English | [中文](2026-08-17-macos-desktop-gui.zh.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
 
-**Goal:** Build a signed, Mac-first Electron application that hosts a local DSH runtime without a network listener and presents the existing plugin-composed client as a native desktop workbench for local independent developers.
+**Goal:** Build an ad-hoc signed, non-notarized Mac-first Electron application that hosts a local DSH runtime without a network listener and presents the existing plugin-composed client as a native desktop workbench for local independent developers.
 
 **Architecture:** Electron main owns an application-scoped DesktopRuntimeSupervisor, a file-backed client-bundle catalog, native windows, and every privileged macOS operation. A context-isolated preload bridge carries the established API request-response protocol and the two downlink streams to a desktop API client inside the existing browser client composition. Desktop-specific UI contributes through declared client slots; it does not fork session, conversation, permission, or tool state.
 
@@ -46,10 +48,10 @@
 - Create: apps/desktop/src/menu.ts - owns native macOS menus and dispatches declared desktop commands to the active renderer.
 - Create: apps/desktop/src/protocol.ts - resolves only catalog-authorized client bundle files and packaged renderer assets.
 - Create: apps/desktop/tests/desktop.e2e.ts - drives a fixture composition through Electron and proves the no-listener requirement.
-- Create: packages/client/ui-desktop/package.json - desktop-only client plugin package.
-- Create: packages/client/ui-desktop/src/client/DesktopChrome.tsx - renders the workbench toolbar, run state, and desktop command bindings.
-- Create: packages/client/ui-desktop/src/client/ExecutionContextRow.tsx - presents workspace, preset, model, team or expert, and permission scopes outside the composer body.
-- Create: packages/client/ui-desktop/src/client/desktop-store.ts - stores desktop-local inspector visibility and run context presentation state.
+- Create: planned/client/ui-desktop/package.json - desktop-only client plugin package.
+- Create: planned/client/ui-desktop/src/client/DesktopChrome.tsx - renders the workbench toolbar, run state, and desktop command bindings.
+- Create: planned/client/ui-desktop/src/client/ExecutionContextRow.tsx - presents workspace, preset, model, team or expert, and permission scopes outside the composer body.
+- Create: planned/client/ui-desktop/src/client/desktop-store.ts - stores desktop-local inspector visibility and run context presentation state.
 - Modify: packages/client/ui-layout/src/client/AppFrame.tsx - declares and renders toolbar and inspector-control slots without changing session state ownership.
 - Modify: packages/client/ui-layout/src/client/stores.ts - accepts restored panel preferences through its declared store action API.
 - Modify: packages/client/ui-sidebar/src/client/SidebarRoot.tsx - separates workspace/session navigation from stable plugin destinations.
@@ -75,7 +77,7 @@
 
 - [ ] **Step 1: Write catalog tests before extracting host code.**
 
-~~~ts
+~~~text
 it('creates a content-addressed boot graph from composed client rows', () => {
   const catalog = createClientBundleCatalog(entries)
   expect(catalog.createBootGraph().entries).toEqual([
@@ -97,7 +99,7 @@ Expected: FAIL because createClientBundleCatalog is not exported.
 
 - [ ] **Step 3: Implement the catalog as a host-only provider.**
 
-~~~ts
+~~~text
 export interface ClientBundleCatalog {
   createBootGraph(): WebBootGraph
   resolveBundle(id: string, rev: string): URL
@@ -148,7 +150,7 @@ git commit -m "refactor: extract client bundle catalog"
 
 - [ ] **Step 1: Write tests for request forwarding, downlink ordering, malformed event rejection, and abort propagation.**
 
-~~~ts
+~~~text
 it('sends unary calls through the desktop bridge without a network request', async () => {
   const bridge = fakeDesktopBridge({ response: rpcOk({ name: 'DSH Desktop' }) })
   const client = new DesktopApiClient(bridge)
@@ -173,7 +175,7 @@ Expected: FAIL because DesktopApiClient and DesktopBridge do not exist.
 
 - [ ] **Step 3: Define the renderer-safe bridge contract.**
 
-~~~ts
+~~~text
 export interface DesktopBridge {
   request(request: DesktopRequest): Promise<DesktopResponse>
   subscribe(kind: 'mux' | 'host', listener: (message: unknown) => void, onClose: () => void): () => void
@@ -197,7 +199,7 @@ Map doFetch to DesktopBridge.request. Reuse the existing API schemas when parsin
 
 - [ ] **Step 5: Update connection apply selection without weakening fixture behavior.**
 
-~~~ts
+~~~text
 const desktopBridge = window.__DSH_DESKTOP__
 const api: IApiClient = fixtureClient ?? (desktopBridge === undefined ? new WebApiClient() : new DesktopApiClient(desktopBridge))
 ~~~
@@ -239,7 +241,7 @@ git commit -m "feat: add desktop client transport"
 
 - [ ] **Step 1: Write the runtime state-machine tests.**
 
-~~~ts
+~~~text
 it('starts the desktop composition without registering a web server', async () => {
   const runtime = new DesktopRuntimeSupervisor(options)
   await runtime.start()
@@ -263,7 +265,7 @@ Expected: FAIL because the package and service do not exist.
 
 - [ ] **Step 3: Implement the explicit runtime lifecycle.**
 
-~~~ts
+~~~text
 export type DesktopRuntimeState = 'starting' | 'ready' | 'degraded' | 'stopping' | 'stopped'
 
 export interface DesktopRuntimeSupervisor {
@@ -323,7 +325,7 @@ git commit -m "feat: add desktop DSH runtime"
 
 - [ ] **Step 1: Write security and protocol tests.**
 
-~~~ts
+~~~text
 it('registers only packaged renderer and active catalog files', async () => {
   const response = await protocol.fetch('dsh-client://bundle/%40deepseek-ai%2Fdsh-client-runtime?rev=abc')
   expect(await response.text()).toContain('__ModuleLoader__')
@@ -392,7 +394,7 @@ git commit -m "feat: add Electron desktop shell"
 
 - [ ] **Step 1: Create the failing assembled Electron scenario.**
 
-~~~ts
+~~~text
 it('boots a local session through IPC with no listening DSH port', async () => {
   const app = await launchDesktop({ fixture: 'desktop.cordis.yml' })
   await expect(app.window.getByRole('textbox')).toBeVisible()
@@ -437,17 +439,17 @@ git commit -m "test: cover desktop IPC boot"
 ### Task 6: Add the desktop toolbar, native command bridge, and restored panel geometry
 
 **Files:**
-- Create: packages/client/ui-desktop/package.json
-- Create: packages/client/ui-desktop/src/client/index.ts
-- Create: packages/client/ui-desktop/src/client/DesktopChrome.tsx
-- Create: packages/client/ui-desktop/src/client/desktop-store.ts
-- Create: packages/client/ui-desktop/src/client/DesktopChrome.module.css
+- Create: planned/client/ui-desktop/package.json
+- Create: planned/client/ui-desktop/src/client/index.ts
+- Create: planned/client/ui-desktop/src/client/DesktopChrome.tsx
+- Create: planned/client/ui-desktop/src/client/desktop-store.ts
+- Create: planned/client/ui-desktop/src/client/DesktopChrome.module.css
 - Modify: packages/client/ui-layout/src/client/AppFrame.tsx
 - Modify: packages/client/ui-layout/src/client/stores.ts
 - Modify: apps/desktop/src/menu.ts
 - Modify: apps/desktop/src/main.ts
-- Test: packages/client/ui-desktop/tests/desktop-chrome.client.spec.tsx
-- Test: packages/client/ui-layout/tests/layout.client.spec.tsx
+- Test: planned/client/ui-desktop/tests/desktop-chrome.client.spec.tsx
+- Test: planned/client/ui-layout/tests/layout.client.spec.tsx
 - Test: apps/desktop/tests/menu.spec.ts
 
 **Consumes:** DesktopBridge from Task 2 and restored DesktopWindowState from Task 4.
@@ -473,7 +475,7 @@ it('dispatches the View inspector menu item only to the focused renderer', async
 
 - [ ] **Step 2: Run the focused tests and confirm the desktop UI package is missing.**
 
-Run: pnpm exec vitest run packages/client/ui-desktop/tests/desktop-chrome.client.spec.tsx apps/desktop/tests/menu.spec.ts
+Run: pnpm exec vitest run planned/client/ui-desktop/tests/desktop-chrome.client.spec.tsx apps/desktop/tests/menu.spec.ts
 
 Expected: FAIL because ui-desktop and the menu dispatcher do not exist.
 
@@ -483,7 +485,7 @@ Declare shell.toolbar and shell.inspector-control as children of the existing ro
 
 - [ ] **Step 4: Create the desktop presentation store.**
 
-~~~ts
+~~~text
 export interface DesktopPresentationState {
   inspectorVisible: boolean
   sourceListVisible: boolean
@@ -511,7 +513,7 @@ On desktop plugin activation, read DesktopWindowState once and seed store action
 
 - [ ] **Step 7: Run focused tests and the GUI inner loop.**
 
-Run: pnpm exec vitest run packages/client/ui-desktop/tests/desktop-chrome.client.spec.tsx packages/client/ui-layout/tests/layout.client.spec.tsx apps/desktop/tests/menu.spec.ts
+Run: pnpm exec vitest run planned/client/ui-desktop/tests/desktop-chrome.client.spec.tsx planned/client/ui-layout/tests/layout.client.spec.tsx apps/desktop/tests/menu.spec.ts
 
 Run: pnpm run test:gui
 
@@ -532,7 +534,7 @@ git commit -m "feat: add desktop workbench chrome"
 - Modify: packages/client/ui-conversation/src/client/skeleton/DetailsPanel.tsx
 - Modify: packages/client/ui-layout/src/client/AppFrame.tsx
 - Test: packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx
-- Test: packages/client/ui-conversation/tests/details-panel.client.spec.tsx
+- Test: planned/client/ui-conversation/tests/details-panel.client.spec.tsx
 - Test: apps/web/tests/navigation-panes.e2e.ts
 
 **Consumes:** Existing workspace and session hooks, plus desktop panel state from Task 6 when available.
@@ -574,7 +576,7 @@ Keep the empty conversation functional, but reduce hero presentation to a compac
 
 - [ ] **Step 6: Run component, GUI, and assembled visual tests.**
 
-Run: pnpm exec vitest run packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx packages/client/ui-conversation/tests/details-panel.client.spec.tsx
+Run: pnpm exec vitest run packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx planned/client/ui-conversation/tests/details-panel.client.spec.tsx
 
 Run: pnpm run test:gui
 
@@ -592,15 +594,15 @@ git commit -m "feat: organize desktop workspace navigation"
 ### Task 8: Consolidate execution context and run-state recovery
 
 **Files:**
-- Create: packages/client/ui-desktop/src/client/ExecutionContextRow.tsx
-- Create: packages/client/ui-desktop/src/client/RunStateControl.tsx
+- Create: planned/client/ui-desktop/src/client/ExecutionContextRow.tsx
+- Create: planned/client/ui-desktop/src/client/RunStateControl.tsx
 - Modify: packages/client/ui-conversation/src/client/contract/slots.ts
 - Modify: packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx
 - Modify: packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
 - Modify: packages/client/ui-permission-presets/src/client/PermissionRow.tsx
 - Modify: packages/client/ui-model-selection/src/client/ModelSelect.tsx
-- Test: packages/client/ui-desktop/tests/execution-context.client.spec.tsx
-- Test: packages/client/ui-conversation/tests/conversation-root.client.spec.tsx
+- Test: planned/client/ui-desktop/tests/execution-context.client.spec.tsx
+- Test: planned/client/ui-conversation/tests/conversation-root.client.spec.tsx
 - Test: apps/desktop/tests/recovery.e2e.ts
 
 **Consumes:** Existing preset, model, permission, workspace, expert, and session services. It does not add a parallel persistence model.
@@ -624,7 +626,7 @@ it('keeps the composer focused on input and send actions', () => {
 
 - [ ] **Step 2: Run the focused tests and confirm that the context row is absent.**
 
-Run: pnpm exec vitest run packages/client/ui-desktop/tests/execution-context.client.spec.tsx packages/client/ui-conversation/tests/conversation-root.client.spec.tsx
+Run: pnpm exec vitest run planned/client/ui-desktop/tests/execution-context.client.spec.tsx planned/client/ui-conversation/tests/conversation-root.client.spec.tsx
 
 Expected: FAIL because the execution-context slot and components do not exist.
 
@@ -646,7 +648,7 @@ Launch a fixture run, reload the renderer, restart the runtime supervisor, and f
 
 - [ ] **Step 7: Run focused and assembled tests.**
 
-Run: pnpm exec vitest run packages/client/ui-desktop/tests/execution-context.client.spec.tsx packages/client/ui-conversation/tests/conversation-root.client.spec.tsx
+Run: pnpm exec vitest run planned/client/ui-desktop/tests/execution-context.client.spec.tsx planned/client/ui-conversation/tests/conversation-root.client.spec.tsx
 
 Run: pnpm --filter @deepseek-ai/dsh-desktop test:e2e -- recovery.e2e.ts
 
@@ -663,90 +665,83 @@ git commit -m "feat: clarify desktop execution context"
 
 ## Milestone 3: Distribution and Documentation
 
-### Task 9: Add macOS packaging, signing, notarization, and release smoke coverage
+### Task 9: Add macOS packaging and artifact smoke coverage
 
 **Files:**
 - Modify: apps/desktop/package.json
-- Create: apps/desktop/forge.config.ts
-- Create: apps/desktop/scripts/verify-macos-artifact.ts
-- Create: apps/desktop/tests/packaged-macos.e2e.ts
+- Create: apps/desktop/forge.config.cjs
+- Create: apps/desktop/scripts/stage-mac.mjs
+- Create: apps/desktop/scripts/package-mac.mjs
+- Create: apps/desktop/scripts/make-dmg.mjs
 - Modify: package.json
-- Create: .github/workflows/release-desktop.yml
-- Modify: docs/subsystems/desktop-runtime.md
-- Create: .agents/notes/implemented/feature/2026-08-17-macos-desktop-gui.md
+- Create: .github/workflows/desktop-macos.yml
+- Modify: apps/desktop/README.md
+- Create: .agents/notes/implemented/architecture/2026-08-17-desktop-runtime-no-listener.md
 
 **Consumes:** A passing assembled Electron app from Tasks 1 through 8.
 
-**Produces:** An Apple-silicon macOS application artifact that is signed, notarized, Gatekeeper-validated, and covered by a packaged-app smoke test.
+**Produces:** An Apple-silicon macOS application and compressed disk image with an ad-hoc signature, without Developer ID signing or notarization, and covered by package-structure validation.
 
-- [ ] **Step 1: Write failing artifact-verification tests.**
+- [ ] **Step 1: Write failing package-closure tests.**
 
-~~~ts
-it('rejects an unsigned or unnotarized desktop artifact', async () => {
-  await expect(verifyMacosArtifact(unsignedApp)).rejects.toThrow('codesign verification failed')
-})
-
-it('starts the packaged application with no DSH listener', async () => {
-  const app = await launchPackagedDesktop(artifact)
-  await expect(app.window.getByRole('textbox')).toBeVisible()
-  expect(await listeningPortsOwnedBy(app.pid)).toEqual([])
+~~~text
+it('requires the packaged application resources and unpacked runtime closure', () => {
+  expect(applicationResources).toContain('app.asar')
+  expect(applicationResources).toContain('app.asar.unpacked/node_modules')
+  expect(applicationResources).toContain('config/cordis.yml')
+  expect(applicationResources).toContain('renderer/index.html')
 })
 ~~~
 
-- [ ] **Step 2: Run the verifier test and confirm packaging support is absent.**
+- [ ] **Step 2: Run the focused app tests and confirm packaging support is absent.**
 
-Run: pnpm --filter @deepseek-ai/dsh-desktop test:e2e -- packaged-macos.e2e.ts
+Run: pnpm --filter @deepseek-ai/dsh-desktop test
 
-Expected: FAIL because no packaged desktop artifact exists.
+Expected: FAIL because the package closure and packaged resource locator are absent.
 
-- [ ] **Step 3: Configure an arm64 macOS package.**
+- [ ] **Step 3: Configure the macOS 14+ arm64 package.**
 
-Build apps/web before packaging, include the desktop bundle, DSH runtime dependencies, client-bundle assets, and preload output in the application resources. Exclude source maps, development fixtures, and unneeded platform binaries. Fail the packager when a declared client graph asset is missing.
+Build host libraries, client libraries, apps/web, and the Electron main process before staging. Stage the renderer, configuration, preset root, desktop bundle, preload output, and materialized production runtime closure. Exclude source maps and fail when a required resource or staged symbolic link remains.
 
-- [ ] **Step 4: Add deterministic signing and notarization inputs.**
+- [ ] **Step 4: Build a non-notarized application and disk image.**
 
-Use APPLE_DEVELOPER_ID_APPLICATION_P12, APPLE_DEVELOPER_ID_APPLICATION_P12_PASSWORD, APPLE_TEAM_ID, APPLE_NOTARY_KEY, APPLE_NOTARY_KEY_ID, and APPLE_NOTARY_ISSUER_ID in the desktop release workflow. The packaging command refuses release mode when any required identity is absent. Local unsigned development builds use a distinct development command and never claim notarization.
+Use an ad-hoc Electron signature with no Developer ID identity, Apple credentials, notarization, or GitHub Release. Create `DSH.app` with Electron Forge and create a compressed DMG with `hdiutil`.
 
 - [ ] **Step 5: Verify the final artifact.**
 
 ~~~bash
-codesign --verify --deep --strict --verbose=2 "DSH.app"
-spctl --assess --type execute --verbose=4 "DSH.app"
-xcrun stapler validate "DSH.app"
+codesign --verify --deep --strict "DSH.app"
+hdiutil verify "DSH-<version>-arm64.dmg"
 ~~~
 
-Run the packaged app smoke test on an Apple-silicon macOS runner after notarization.
+Run the packaged application smoke and structure checks on a macOS 14 Apple-silicon runner.
 
 - [ ] **Step 6: Document the desktop service and decision record.**
 
-Document runtime lifecycle, bridge wire operations, no-listener guarantee, persistent-state ownership, failure behavior, native command routing, build commands, and the model/token effect. The Agent Note records why Electron main hosts the runtime and why credentials stay behind DSH providers.
+Document runtime lifecycle, bridge wire operations, no-listener guarantee, persistent-state ownership, failure behavior, native command routing, build commands, ad-hoc signing limitation, and the model/token effect. The Agent Note records why Electron main hosts the runtime and why credentials stay behind DSH providers.
 
-- [ ] **Step 7: Run the narrow release validation ladder.**
+- [ ] **Step 7: Run the narrow distribution validation ladder.**
 
-Run: pnpm run test:gui
+Run: pnpm --filter @deepseek-ai/dsh-desktop test
 
-Run: DSH_SNAPSHOT=replay pnpm run test:web
-
-Run: pnpm --filter @deepseek-ai/dsh-desktop test:e2e
-
-Run: pnpm run verify-doc-budgets
+Run: pnpm run constraints
 
 Run: pnpm run doc-sync
 
-Expected: PASS, except signing and notarization commands when no release credentials are intentionally present; the release workflow owns those credentialed checks.
+Expected: PASS. The GitHub Actions workflow uploads the application and disk image as an artifact without Apple credentials or a GitHub Release.
 
 - [ ] **Step 8: Commit the distribution surface.**
 
 ~~~bash
-git add apps/desktop package.json pnpm-lock.yaml .github/workflows/release-desktop.yml docs/subsystems/desktop-runtime.md .agents/notes/implemented/feature/2026-08-17-macos-desktop-gui.md
+git add apps/desktop package.json pnpm-lock.yaml .github/workflows/desktop-macos.yml .agents/notes/implemented/architecture/2026-08-17-desktop-runtime-no-listener.md
 git commit -m "feat: package DSH Desktop for macOS"
 ~~~
 
 ## Plan Self-Review
 
-Spec coverage: Tasks 1 through 5 implement file-backed client loading, in-process DSH runtime, no-listener transport, preload isolation, durable session reuse, Electron lifecycle, and assembled IPC verification. Tasks 6 through 8 implement the Mac workbench layout, navigation hierarchy, inspector behavior, native commands, execution context, permission scope presentation, and recoverable run states. Task 9 covers direct signed distribution, notarization, Gatekeeper, documentation, and macOS smoke verification.
+Spec coverage: Tasks 1 through 5 implement file-backed client loading, in-process DSH runtime, no-listener transport, preload isolation, durable session reuse, Electron lifecycle, and assembled IPC verification. Tasks 6 through 8 implement the Mac workbench layout, navigation hierarchy, inspector behavior, native commands, execution context, permission scope presentation, and recoverable run states. Task 9 covers ad-hoc application and disk-image packaging, Actions artifacts, documentation, and macOS smoke verification.
 
-Placeholder scan: Every task names created or modified files, concrete tests, commands, produced interfaces, and commit boundaries. The only external prerequisites are Apple release identities, which are named release-workflow secret inputs and deliberately block release mode rather than produce an unsigned release claim.
+Placeholder scan: Every task names created or modified files, concrete tests, commands, produced interfaces, and commit boundaries. The only external prerequisite is an Apple-silicon macOS 14 runner; packaging requires no Apple identity, notarization input, or publication credential.
 
 Type consistency: ClientBundleCatalog supplies the boot graph and authorized assets to Electron protocol.ts. DesktopBridge is consumed by DesktopApiClient and implemented by preload.ts plus runtime bridge.ts. DesktopRuntimeSupervisor provides runtime lifecycle to main.ts. Desktop presentation state travels through declared ui-desktop stores and ui-layout slots, not through Electron objects or session mutations.
 

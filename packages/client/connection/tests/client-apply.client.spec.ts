@@ -83,10 +83,17 @@ describe('connection client apply', () => {
 
   it('keeps fixture first and selects DesktopApiClient only when window.__DSH_DESKTOP__ exists', async () => {
     const bridge: DesktopBridge = {
-      request: async () => ({ type: 'server-response', rpcId: 'unused', result: { ok: false, error: { code: 'internal' as const, message: 'no response', details: {} } } }),
+      request: async () => ({ type: 'server-response', rpcId: RpcId('unused'), result: { ok: false, error: { code: 'internal' as const, message: 'no response', details: {} } } }),
+      cancel: () => undefined,
       subscribe: () => () => undefined,
       sendCommand: async () => undefined,
-      getWindowState: async () => ({ width: 1200, height: 800 }),
+      getWindowState: async () => ({
+        bounds: { x: 0, y: 0, width: 1200, height: 800 },
+        sourceListVisible: true,
+        inspectorVisible: false,
+        sourceListWidth: 280,
+        inspectorWidth: 420,
+      }),
       setWindowState: async () => undefined,
     }
     ;(globalThis as Win).location = { hostname: 'localhost', search: '?fixture' }

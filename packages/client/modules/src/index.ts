@@ -285,14 +285,14 @@ window.__ModuleLoader__={
 }
 
 /**
- * The web plugin table service: incremental `dsh.client` scan + wire composition
- * + bundle route + index tap. Construction runs the activation scan
+ * The client plugin table service: incremental `dsh.client` scan and wire composition,
+ * with bundle route and index tap only when WebServer is composed. Construction runs the activation scan
  * synchronously — a malformed declaration or missing bundle among the
  * already-loaded entries aggregates into one loud throw (FAILED fiber; the
  * boot activation audit reports it).
  */
 export class ClientModuleRegistry extends Service {
-  static inject = ['webServer', 'loader']
+  static inject = ['loader']
 
   private readonly table = new Map<string, WebPluginRecord>()
   // Negative verdicts (unresolvable specifier — builtins like cordis:include,
@@ -349,14 +349,18 @@ export class ClientModuleRegistry extends Service {
       throw new ClientPackageCompositionError(failures)
     }
 
-    ctx.effect(
-      () => ctx.webServer.register({ kind: 'prefix', path: '/plugins', handler: this.serveBundle }),
-      'client-modules: bundle route',
-    )
-    ctx.effect(
-      () => ctx.webServer.tapIndex(html => injectBootManifest(html, this.composed)),
-      'client-modules: boot manifest injection',
-    )
+    const installWebEffects = (webCtx: Context): void => {
+      webCtx.effect(
+        () => webCtx.webServer.register({ kind: 'prefix', path: '/plugins', handler: this.serveBundle }),
+        'client-modules: bundle route',
+      )
+      webCtx.effect(
+        () => webCtx.webServer.tapIndex(html => injectBootManifest(html, this.composed)),
+        'client-modules: boot manifest injection',
+      )
+    }
+    if (ctx.get('webServer') !== undefined) installWebEffects(ctx)
+    else ctx.inject(['webServer'], installWebEffects)
   }
 
   /**

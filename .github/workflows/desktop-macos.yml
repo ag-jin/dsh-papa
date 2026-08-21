@@ -1,0 +1,80 @@
+name: Build macOS desktop app
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/macos-desktop-package
+    tags:
+      - 'dsh-desktop-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  package:
+    name: Package macOS 14 arm64 desktop app
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run desktop unit tests
+        run: pnpm --filter @deepseek-ai/dsh-desktop run test
+
+      - name: Package application and disk image
+        run: pnpm run desktop:make:mac
+
+      - name: Run assembled Electron acceptance test
+        run: node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/assembled-transport.e2e.ts
+
+      - name: Run packaged application smoke
+        run: node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/packaged-app-smoke.e2e.ts
+
+      - name: Verify packaged artifacts
+        run: |
+          set -euo pipefail
+          app='apps/desktop/out/DSH-darwin-arm64/DSH.app'
+          dmg=$(find apps/desktop/out -maxdepth 1 -name 'DSH-*-arm64.dmg' -type f -print -quit)
+          test -d "$app"
+          test -f "$app/Contents/Info.plist"
+          test -f "$app/Contents/Frameworks/Electron Framework.framework/Electron Framework"
+          test -f "$app/Contents/Resources/app.asar"
+          test -d "$app/Contents/Resources/app.asar.unpacked/node_modules"
+          test -f "$app/Contents/Resources/config/cordis.yml"
+          test -f "$app/Contents/Resources/renderer/index.html"
+          test -d "$app/Contents/Resources/app.asar.unpacked/node_modules/@deepseek-ai/cosmokit"
+          test -d "$app/Contents/Resources/app.asar.unpacked/node_modules/@standard-schema/spec"
+          test -n "$dmg"
+          codesign --verify --deep --strict "$app"
+          codesign --display --entitlements :- "$app" | plutil -extract com.apple.security.cs.allow-jit raw -expect true -
+          codesign --display --entitlements :- "$app" | plutil -extract com.apple.security.cs.disable-library-validation raw -expect true -
+          hdiutil verify "$dmg"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dsh-desktop-macos-arm64-${{ github.run_number }}
+          path: |
+            apps/desktop/out/DSH-darwin-arm64/DSH.app
+            apps/desktop/out/DSH-*-arm64.dmg
+          if-no-files-found: error
+          retention-days: 14

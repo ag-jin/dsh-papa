@@ -722,6 +722,52 @@ roots(): Agent[]
 
 Source: [`packages/core/agent/src/index.ts:256`](../../packages/core/agent/src/index.ts)
 
+<a id="ctxdesktopruntime--desktopruntimesupervisor"></a>
+
+### `ctx.desktopRuntime` — `DesktopRuntimeSupervisor`
+
+Owns embedded DSH lifecycle, attached desktop windows, and cancellation. It accepts only a supplied API proxy; it never creates a DSH web listener.
+
+```ts cordis-catalog
+/** Start the embedded runtime and acquire its API proxy. */
+async start(): Promise<void>
+
+/**
+ * Attach a desktop window and its future downlink publisher.
+ * @param windowId - Unique sender window identifier.
+ * @param publish - Publisher to own until detach or runtime stop.
+ * @returns Idempotent detach function.
+ */
+attachWindow(windowId: string, publish: DesktopDownlinkPublisher): () => void
+
+/**
+ * Process one request for an attached renderer window.
+ * @param windowId - Sender window identifier.
+ * @param request - Validated desktop RPC envelope.
+ * @returns Server response envelope or client-response receipt.
+ */
+async request(windowId: string, request: DesktopRequest): Promise<DesktopResponse>
+
+/**
+ * Record an rpc-id cancellation for one attached renderer window.
+ * @param windowId - Sender window identifier.
+ * @param rpcId - Correlation identifier of the active client request.
+ * @returns Completion once the matching request has been aborted, if any.
+ */
+async cancel(windowId: string, rpcId: string): Promise<void>
+
+/** Stop admission, abort owned work, and await active dispatches and downlinks before reporting stopped. */
+stop(): Promise<void>
+
+/**
+ * Read immutable desktop runtime state facts.
+ * @returns Current lifecycle and embedded transport availability facts.
+ */
+snapshot(): DesktopRuntimeSnapshot
+```
+
+Source: [`packages/desktop/runtime/src/runtime.ts:120`](../../packages/desktop/runtime/src/runtime.ts)
+
 <a id="agent-events"></a>
 
 ### `agent/*` events

@@ -1,5 +1,7 @@
 # macOS Desktop GUI Design
 
+English | [中文](2026-08-17-macos-desktop-gui-design.zh.md)
+
 ## Objective
 
 Deliver an installable Mac-first DSH desktop application for local independent developers.
@@ -12,7 +14,7 @@ The browser GUI remains the cross-platform surface. The desktop application must
 
 The first release targets Apple silicon systems running macOS 14 or later, matching the repository's existing macOS runtime distribution. Intel support, mobile clients, Mac App Store distribution, automatic updates, cross-device synchronization, and custom themes are outside this release.
 
-DSH Desktop is distributed directly as a signed and notarized application. The Mac App Store sandbox is incompatible with the broad local filesystem and shell access that DSH exposes under explicit user-controlled permissions.
+DSH Desktop is distributed as an ad-hoc signed application and compressed disk image, without Developer ID signing or notarization. The Mac App Store sandbox is incompatible with the broad local filesystem and shell access that DSH exposes under explicit user-controlled permissions.
 
 A workspace is the primary window identity. Sessions belong to a workspace. A developer can open several workspace windows, and the application restores their workspace, selected session, sidebar state, inspector state, and panel widths after relaunch.
 
@@ -20,7 +22,7 @@ The first release optimizes a local development loop: open a workspace, create o
 
 ## Architecture
 
-A new apps/desktop Electron application owns the macOS application lifecycle and loads the built web client from a file URL.
+A new apps/desktop Electron application owns the macOS application lifecycle and loads the packaged renderer through the privileged `dsh-app://renderer/` scheme; authorized client bundles load through `dsh-client://bundle/`.
 
 The Electron main process owns a single application-level DesktopRuntimeSupervisor. It activates a desktop Cordis composition that retains DSH's session persistence, agent loop, API dispatcher, and enabled tools but omits the HTTP web server and frontend static server. The desktop composition never exposes an application LAN listener.
 
@@ -100,7 +102,7 @@ Client coverage continues through pnpm run test:gui. It includes desktop connect
 
 Desktop integration tests launch the Electron application against a fixture DSH composition. They create and resume a session, exercise streaming events, run a controlled tool, open the Files and Changes inspector, deliver an approval request, stop a run, simulate a renderer reload, and verify that no LAN socket is opened.
 
-macOS smoke coverage launches the packaged application on Apple silicon, checks application startup, standard keyboard commands, native file selection, window restoration, and recovery after a runtime restart. Release verification adds signing, notarization, and Gatekeeper validation.
+macOS smoke coverage launches the packaged application on Apple silicon, checks application startup, standard keyboard commands, native file selection, window restoration, recovery after a runtime restart, ad-hoc signature integrity, and disk-image integrity.
 
 ## Acceptance Criteria
 

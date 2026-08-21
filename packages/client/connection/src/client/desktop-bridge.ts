@@ -23,14 +23,64 @@ export interface DesktopCommand {
   args?: JsonValue
 }
 
-/** JSON-compatible window bounds/state carried to the desktop main process. */
-export interface DesktopWindowState {
+/** Desktop window geometry returned by the Electron main process. */
+export interface DesktopWindowBounds {
+  /** Horizontal origin in display coordinates. */
+  x: number
+  /** Vertical origin in display coordinates. */
+  y: number
   /** Window width in CSS pixels. */
   width: number
   /** Window height in CSS pixels. */
   height: number
-  /** Optional window minimized state. */
-  minimized?: boolean
+}
+
+/** A renderer-provided subset of the Electron-owned window bounds. */
+export interface DesktopWindowBoundsUpdate {
+  /** Horizontal origin in display coordinates, when restoring a prior position. */
+  x?: number
+  /** Vertical origin in display coordinates, when restoring a prior position. */
+  y?: number
+  /** Window width in CSS pixels, when updating the visible size. */
+  width?: number
+  /** Window height in CSS pixels, when updating the visible size. */
+  height?: number
+}
+
+/** Complete desktop-local state returned by the Electron main process. */
+export interface DesktopWindowState {
+  /** Normalized Electron window geometry. */
+  bounds: DesktopWindowBounds
+  /** Selected DSH workspace identity, when one was active. */
+  activeWorkspaceId?: string
+  /** Selected DSH session identity, when one was active. */
+  activeSessionId?: string
+  /** Whether the source list is visible. */
+  sourceListVisible: boolean
+  /** Whether the contextual inspector is visible. */
+  inspectorVisible: boolean
+  /** Persisted source-list width in CSS pixels. */
+  sourceListWidth: number
+  /** Persisted inspector width in CSS pixels. */
+  inspectorWidth: number
+}
+
+/** Renderer-provided desktop-local state fields normalized by the Electron main process. */
+export interface DesktopWindowStateUpdate {
+  /** Window geometry to restore or update. */
+  bounds?: DesktopWindowBoundsUpdate
+  /** Selected DSH workspace identity, when one was active. */
+  activeWorkspaceId?: string
+  /** Selected DSH session identity, when one was active. */
+  activeSessionId?: string
+  /** Whether the source list is visible. */
+  sourceListVisible?: boolean
+  /** Whether the contextual inspector is visible. */
+  inspectorVisible?: boolean
+  /** Persisted source-list width in CSS pixels. */
+  sourceListWidth?: number
+  /** Persisted inspector width in CSS pixels. */
+  inspectorWidth?: number
 }
 
 /** Channel of a downlink event subscription. */
@@ -57,10 +107,10 @@ export interface DesktopBridge {
   subscribe(kind: DesktopEventKind, listener: (message: unknown) => void, onClose: () => void): () => void
   /** Send one native desktop command. Tasks 4/6 define the command producers. */
   sendCommand(command: DesktopCommand): Promise<void>
-  /** Read current window bounds/state from the main process. */
+  /** Read the current normalized desktop-local state from the main process. */
   getWindowState(): Promise<DesktopWindowState>
-  /** Request new window bounds/state from the main process. */
-  setWindowState(state: DesktopWindowState): Promise<void>
+  /** Request a normalized desktop-local state update from the main process. */
+  setWindowState(state: DesktopWindowStateUpdate): Promise<void>
 }
 
 declare global {
