@@ -62,15 +62,15 @@ async function waitForCdp(child: ChildProcess, port: number, output: () => strin
 }
 
 async function waitForDesktopPage(browser: Browser): Promise<Page> {
-  let desktopPage: Page | undefined
-  await expect.poll(() => {
-    desktopPage = browser.contexts()
+  const deadline = Date.now() + 60_000
+  while (Date.now() < deadline) {
+    const desktopPage = browser.contexts()
       .flatMap(context => context.pages())
       .find(page => page.url().startsWith('dsh-app://renderer/'))
-    return desktopPage?.url()
-  }, { timeout: 60_000 }).toMatch(/^dsh-app:\/\/renderer\//)
-  if (desktopPage === undefined) throw new Error('packaged DSH did not create its renderer page')
-  return desktopPage
+    if (desktopPage !== undefined) return desktopPage
+    await new Promise((resolve) => { setTimeout(resolve, 100) })
+  }
+  throw new Error('packaged DSH did not create its renderer page within 60s')
 }
 
 async function waitForClose(child: ChildProcess, timeout: number): Promise<boolean> {
