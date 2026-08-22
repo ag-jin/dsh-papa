@@ -3,8 +3,8 @@ import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from 'node
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { copyApplicationForDiskImage } from '../scripts/make-macos-dmg.mjs'
+import { describe, expect, it, vi } from 'vitest'
+import { copyApplicationForDiskImage, createDarwinDiskImage } from '../scripts/make-macos-dmg.mjs'
 import { materializeProductionClosure } from '../scripts/stage-desktop.mjs'
 import { verifyMaterializedApplication } from '../scripts/verify-desktop-artifacts.mjs'
 
@@ -103,6 +103,46 @@ describe('desktop packaged dependency closure', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('retries a transient hdiutil resource-busy failure', async () => {
+    const spawn = vi.fn()
+      .mockReturnValueOnce({ status: 1, signal: null, stdout: '', stderr: 'hdiutil: create failed - Resource busy\n' })
+      .mockReturnValueOnce({ status: 0, signal: null, stdout: 'created: output.dmg\n', stderr: '' })
+    const remove = vi.fn()
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await createDarwinDiskImage(['create', 'output.dmg'], '/workspace', spawn, remove, wait)
+
+    expect(spawn).toHaveBeenCalledTimes(2)
+    expect(remove).toHaveBeenCalledOnce()
+    expect(remove).toHaveBeenCalledWith('output.dmg')
+    expect(wait).toHaveBeenCalledOnce()
+    expect(wait).toHaveBeenCalledWith(2_000)
+  })
+
+  it('fails immediately for a non-resource-busy hdiutil error', async () => {
+    const spawn = vi.fn().mockReturnValue({ status: 1, signal: null, stdout: '', stderr: 'hdiutil: create failed - No space left on device\n' })
+    const remove = vi.fn()
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(createDarwinDiskImage(['create', 'output.dmg'], '/workspace', spawn, remove, wait))
+      .rejects.toThrow(/hdiutil create output\.dmg exited with 1/)
+    expect(spawn).toHaveBeenCalledOnce()
+    expect(remove).not.toHaveBeenCalled()
+    expect(wait).not.toHaveBeenCalled()
+  })
+
+  it('fails after exhausting hdiutil resource-busy retries', async () => {
+    const spawn = vi.fn().mockReturnValue({ status: 1, signal: null, stdout: '', stderr: 'hdiutil: create failed - Resource busy\n' })
+    const remove = vi.fn()
+    const wait = vi.fn().mockResolvedValue(undefined)
+
+    await expect(createDarwinDiskImage(['create', 'output.dmg'], '/workspace', spawn, remove, wait))
+      .rejects.toThrow(/hdiutil create output\.dmg exited with 1/)
+    expect(spawn).toHaveBeenCalledTimes(3)
+    expect(remove).toHaveBeenCalledTimes(2)
+    expect(wait).toHaveBeenCalledTimes(2)
   })
 
   it('rejects an extracted Windows delivery directory with missing runtime resources', async () => {

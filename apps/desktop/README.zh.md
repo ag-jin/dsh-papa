@@ -46,7 +46,7 @@ DSH 仍然拥有 credentials、transcript、session、tool result、setting 和 
 
 运行 `pnpm run desktop:package` 会生成本机 target 的 application directory。在 macOS 上运行 `pnpm run desktop:make:mac` 会创建 `apps/desktop/out/DSH-<version>-<arch>.dmg`；在 Windows 上运行 `pnpm run desktop:make:win` 会创建 `apps/desktop/out/make/zip/win32/x64/DSH-win32-x64-<version>.zip`。
 
-macOS 包含 `DSH.app` 并使用 Electron 的 ad-hoc 签名，没有 Developer ID 签名，也未公证。因此在其他 Mac 上，可能需要按住 Control 点击应用或磁盘映像，然后选择“打开”。hardened-runtime 签名会向 Electron 主进程及其 Helper app bundle 授予加载内置 Electron Framework 所需的 entitlement；Plugin Helper 还会保留其 executable-memory entitlement。
+macOS 包含 `DSH.app` 并使用 Electron 的 ad-hoc 签名，没有 Developer ID 签名，也未公证。因此在其他 Mac 上，可能需要按住 Control 点击应用或磁盘映像，然后选择“打开”。hardened-runtime 签名会向 Electron 主进程及其 Helper app bundle 授予加载内置 Electron Framework 所需的 entitlement；Plugin Helper 还会保留其 executable-memory entitlement。创建磁盘映像时，仅会重试 macOS 的瞬时 `hdiutil: create failed - Resource busy` 结果；其他 `hdiutil` 失败会立即停止。
 
 Windows 包是未签名的便携 ZIP。请解压到可写的本地目录后运行 `DSH.exe`；由于该包没有代码签名证书，Windows 可能显示 SmartScreen 警告。
 

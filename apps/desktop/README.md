@@ -46,7 +46,7 @@ Each package command accepts `DSH_DESKTOP_PLATFORM` and `DSH_DESKTOP_ARCH`, reje
 
 Run `pnpm run desktop:package` to create the application directory for the native host. Run `pnpm run desktop:make:mac` on macOS to create `apps/desktop/out/DSH-<version>-<arch>.dmg`, or run `pnpm run desktop:make:win` on Windows to create `apps/desktop/out/make/zip/win32/x64/DSH-win32-x64-<version>.zip`.
 
-The macOS packages contain `DSH.app` and use an ad-hoc Electron signature. They have no Developer ID signature or notarization, so macOS may require Control-clicking the application or disk image and choosing Open on a different Mac. The hardened-runtime signature grants the Electron main process and its Helper app bundles the entitlements needed to load the bundled Electron Framework; the Plugin Helper additionally retains its executable-memory entitlement.
+The macOS packages contain `DSH.app` and use an ad-hoc Electron signature. They have no Developer ID signature or notarization, so macOS may require Control-clicking the application or disk image and choosing Open on a different Mac. The hardened-runtime signature grants the Electron main process and its Helper app bundles the entitlements needed to load the bundled Electron Framework; the Plugin Helper additionally retains its executable-memory entitlement. Disk-image creation retries only macOS's transient `hdiutil: create failed - Resource busy` result; other `hdiutil` failures stop immediately.
 
 The Windows package is an unsigned portable ZIP. Extract it to a writable local directory and run `DSH.exe`; Windows may show a SmartScreen warning because this package has no code-signing certificate.
 
