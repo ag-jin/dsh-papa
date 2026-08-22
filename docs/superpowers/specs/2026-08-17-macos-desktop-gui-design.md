@@ -102,7 +102,7 @@ Client coverage continues through pnpm run test:gui. It includes desktop connect
 
 Desktop integration tests launch the Electron application against a fixture DSH composition. They create and resume a session, exercise streaming events, run a controlled tool, open the Files and Changes inspector, deliver an approval request, stop a run, simulate a renderer reload, and verify that no LAN socket is opened.
 
-Native-runner smoke coverage launches each application materialized from its final delivery artifact, then checks startup, bridge access, embedded session requests, and listener absence. macOS coverage verifies the ad-hoc signatures and mounted disk-image application; Windows coverage verifies the unsigned portable ZIP and its extracted application.
+Native-runner smoke coverage launches each application materialized from its final delivery artifact, then checks startup, bridge access, embedded session requests, and listener absence. macOS coverage verifies the ad-hoc signatures and mounted disk-image application; Windows coverage verifies the unsigned portable ZIP and its extracted application. The build workflow retains only validated Actions artifacts. A separate manual GitHub workflow can attach their final DMG and ZIP files to an existing Release only when its successful source run, source commit, target Release commit, artifact IDs, and filenames agree.
 
 ## Acceptance Criteria
 

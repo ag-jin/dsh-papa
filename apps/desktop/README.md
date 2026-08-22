@@ -50,7 +50,9 @@ The macOS packages contain `DSH.app` and use an ad-hoc Electron signature. They 
 
 The Windows package is an unsigned portable ZIP. Extract it to a writable local directory and run `DSH.exe`; Windows may show a SmartScreen warning because this package has no code-signing certificate.
 
-The `Build desktop applications` GitHub Actions workflow builds each target on its native runner, materializes the final DMG or ZIP, runs the assembled and packaged Electron tests against that materialized application, verifies the platform artifact, and retains it as an Actions artifact for 14 days. It does not use Apple or Windows signing credentials and does not create a GitHub Release.
+The `Build desktop applications` GitHub Actions workflow builds each target on its native runner, materializes the final DMG or ZIP, runs the assembled and packaged Electron tests against that materialized application, verifies the platform artifact, and retains it as an Actions artifact for 14 days. It has read-only repository access and does not create a GitHub Release.
+
+The manual `Promote desktop release assets` workflow can copy the three retained final delivery files to an existing GitHub Release. It accepts an explicit successful desktop workflow run ID and Release tag, requires the source run workflow, source commit, target Release commit, artifact IDs, and delivery filenames to match, and then uploads with the runner-provided `GITHUB_TOKEN`. It does not build packages, create Releases, use Apple or Windows signing credentials, or configure an update service.
 
 ## Model Experience
 

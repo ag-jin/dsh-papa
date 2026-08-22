@@ -50,7 +50,9 @@ macOS 包含 `DSH.app` 并使用 Electron 的 ad-hoc 签名，没有 Developer I
 
 Windows 包是未签名的便携 ZIP。请解压到可写的本地目录后运行 `DSH.exe`；由于该包没有代码签名证书，Windows 可能显示 SmartScreen 警告。
 
-`Build desktop applications` GitHub Actions workflow 会在每个 target 的原生 runner 上构建，materialize 最终 DMG 或 ZIP，针对该 materialized application 运行 assembled 与 packaged Electron test，验证 platform artifact，并将它作为 14 天的 Actions artifact 保留。它不会使用 Apple 或 Windows 签名凭据，也不会创建 GitHub Release。
+`Build desktop applications` GitHub Actions workflow 会在每个 target 的原生 runner 上构建，materialize 最终 DMG 或 ZIP，针对该 materialized application 运行 assembled 与 packaged Electron test，验证 platform artifact，并将它作为 14 天的 Actions artifact 保留。它只拥有只读 repository access，且不会创建 GitHub Release。
+
+手动运行的 `Promote desktop release assets` workflow 可以将三份保留的最终 delivery file 复制到既有 GitHub Release。它接受明确的成功 desktop workflow run ID 与 Release tag，要求 source run workflow、source commit、target Release commit、artifact ID 和 delivery filename 全部匹配，再使用 runner 提供的 `GITHUB_TOKEN` 上传。它不构建 package、不创建 Release、不使用 Apple 或 Windows 签名凭据，也不配置 update service。
 
 ## 模型体验
 

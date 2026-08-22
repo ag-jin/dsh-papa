@@ -102,7 +102,7 @@ Client coverage 继续通过 pnpm run test:gui。它包括 desktop connection st
 
 Desktop integration tests 针对 fixture DSH composition 启动 Electron application。它们创建并恢复 session，执行 streaming events，运行受控 tool，打开 Files 和 Changes inspector，传递 approval request，停止 run，模拟 renderer reload，并验证没有打开 LAN socket。
 
-Native-runner smoke coverage 启动从最终 delivery artifact materialize 的每个 application，再检查 startup、bridge access、embedded session request 和 listener absence。macOS coverage 验证 ad-hoc signature 与从挂载 disk image 得到的 application；Windows coverage 验证未签名的便携 ZIP 与其解压后的 application。
+Native-runner smoke coverage 启动从最终 delivery artifact materialize 的每个 application，再检查 startup、bridge access、embedded session request 和 listener absence。macOS coverage 验证 ad-hoc signature 与从挂载 disk image 得到的 application；Windows coverage 验证未签名的便携 ZIP 与其解压后的 application。build workflow 只保留已经验证的 Actions artifact。独立的手动 GitHub workflow 只有在成功 source run、source commit、target Release commit、artifact ID 和 filename 一致时，才会将其中的最终 DMG 和 ZIP 附加到既有 Release。
 
 ## 验收标准
 
