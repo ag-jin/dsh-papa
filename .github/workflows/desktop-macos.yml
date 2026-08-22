@@ -40,7 +40,9 @@ jobs:
           - target: win32-x64
             platform: win32
             arch: x64
-            runner: windows-latest
+            # @electron/node-gyp 10 cannot discover Visual Studio 18 on the
+            # windows-2025-vs2026 image currently selected by windows-latest.
+            runner: windows-2022
             makeScript: desktop:make:win
     steps:
       - uses: actions/checkout@v6
