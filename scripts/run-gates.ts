@@ -666,6 +666,7 @@ function docSyncLeafGates(options: {
     pnpmScript('package-paths', 'verify-package-paths', { label: 'package paths' }),
     pnpmScript('config-source-ownership', 'verify-config-source-ownership', { label: 'config source ownership' }),
     pnpmScript('package-readme-model-experience', 'verify-package-readme-model-experience', { label: 'package README model experience' }),
+    pnpmScript('upstream-desktop-reference', 'verify-upstream-desktop-reference', { label: 'upstream desktop reference' }),
     pnpmScript('mermaid', 'verify-mermaid'),
     pnpmScript('agent-note-classification', 'verify-agent-note-classification', { label: 'agent note classification' }),
     pnpmScript('agent-note-format', 'verify-agent-note-format', { label: 'agent note format' }),

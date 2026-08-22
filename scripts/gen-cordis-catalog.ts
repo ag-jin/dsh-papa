@@ -52,6 +52,7 @@ export { REGION_BEGIN, REGION_END }
 export const SERVICE_PAGE: Record<string, string> = {
   agentLoop: 'core.md',
   agentDefaultModel: 'core.md',
+  desktopRuntime: 'core.md',
   agentPresets: 'core.md',
   agents: 'core.md',
   apiProxy: 'typert.md',
@@ -224,6 +225,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   AgentOptions: 'core.md',
   AgentStatus: 'core.md',
   ContentBlock: 'llm-streaming.md',
+  ClientBundleCatalog: 'client-modules.md',
   CreateAgentOptions: 'core.md',
   GenerateOptions: 'llm-streaming.md',
   InboxItem: 'core.md',
@@ -596,6 +598,10 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   WorkflowAgentEndInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
   WorkflowAgentInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
   WorkflowResultInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
+  DesktopDownlinkPublisher: 'desktop runtime publisher contract is owned by packages/desktop/runtime/README.md',
+  DesktopRequest: 'desktop runtime bridge request contract is owned by packages/desktop/runtime/README.md',
+  DesktopResponse: 'desktop runtime bridge response contract is owned by packages/desktop/runtime/README.md',
+  DesktopRuntimeSnapshot: 'desktop runtime lifecycle snapshot contract is owned by packages/desktop/runtime/README.md',
 }
 
 /** Repository data policy consumed by the Cordis catalog projector. */

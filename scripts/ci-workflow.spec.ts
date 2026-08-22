@@ -252,6 +252,83 @@ describe('DeepSeek e2e workflow', () => {
   })
 })
 
+describe('Desktop release asset promotion workflow', () => {
+  it('promotes only matching successful desktop artifacts to an existing release', () => {
+    const workflow = loadWorkflow('.github/workflows/promote-desktop-release-assets.yml')
+    const dispatch = workflowEvent(workflow, 'workflow_dispatch')
+    const authorize = workflowJob(workflow, 'authorize')
+    const promote = workflowJob(workflow, 'promote')
+    if (!isRecord(dispatch.inputs) || !Array.isArray(authorize.steps) || !Array.isArray(promote.steps)) {
+      throw new TypeError('Desktop release promotion must define inputs and job steps')
+    }
+
+    expect(workflow.permissions).toEqual({ actions: 'read', contents: 'read' })
+    expect(workflow.concurrency).toMatchObject({
+      group: 'desktop-release-assets-${{ inputs.release_tag }}',
+      'cancel-in-progress': false,
+    })
+    expect(dispatch.inputs).toMatchObject({
+      source_run_id: { required: true, type: 'string' },
+      release_tag: { required: true, type: 'string' },
+    })
+    expect(authorize).toMatchObject({
+      'runs-on': 'ubuntu-latest',
+    })
+    expect(authorize.permissions).toBeUndefined()
+    expect(promote).toMatchObject({
+      needs: 'authorize',
+      'runs-on': 'ubuntu-latest',
+      permissions: { actions: 'read', contents: 'write' },
+    })
+    expect(promote.steps.some(step => isRecord(step) && typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'))).toBe(false)
+
+    const authorizeSteps = authorize.steps.filter(isRecord)
+    const bind = authorizeSteps.find(step => step.name === 'Bind source run to release')
+    if (!isRecord(bind) || typeof bind.run !== 'string') {
+      throw new TypeError('Desktop release promotion must bind the source run to the release')
+    }
+    expect(bind.run).toContain('source_run_id must be a positive decimal workflow run ID')
+    expect(bind.run).toContain("expected_workflow = '.github/workflows/desktop-macos.yml'")
+    expect(bind.run).toContain("source.get('event') != 'push' or source.get('conclusion') != 'success'")
+    expect(bind.run).toContain('repos/$REPOSITORY/commits/$RELEASE_TAG')
+    expect(bind.run).toContain('contents/apps/desktop/package.json?ref=$source_sha')
+    expect(bind.run).toContain('release tag commit must equal the source run head SHA')
+    expect(bind.run).toContain("package.get('version')")
+    expect(bind.run).toContain("f'dsh-desktop-{target}-{run_number}'")
+    expect(bind.run).toContain("artifact.get('expired') is not False")
+
+    const promotionSteps = promote.steps.filter(isRecord)
+    const downloads = promotionSteps.filter(step => typeof step.uses === 'string' && step.uses.startsWith('actions/download-artifact@'))
+    expect(downloads).toHaveLength(3)
+    for (const download of downloads) {
+      expect(download.with).toMatchObject({
+        'github-token': '${{ github.token }}',
+        repository: '${{ github.repository }}',
+        'run-id': '${{ needs.authorize.outputs.source_run_id }}',
+      })
+      expect(isRecord(download.with) && typeof download.with['artifact-ids']).toBe('string')
+    }
+
+    const select = promotionSteps.find(step => step.name === 'Select final delivery files')
+    const upload = promotionSteps.find(step => step.name === 'Upload missing release assets')
+    const verify = promotionSteps.find(step => step.name === 'Verify release assets')
+    if (!isRecord(select) || !isRecord(upload) || !isRecord(verify)
+      || typeof select.run !== 'string' || typeof upload.run !== 'string' || typeof verify.run !== 'string') {
+      throw new TypeError('Desktop release promotion must select, upload, and verify release assets')
+    }
+    expect(select.run).toContain('DSH-$version-arm64.dmg')
+    expect(select.run).toContain('DSH-$version-x64.dmg')
+    expect(select.run).toContain('DSH-win32-x64-$version.zip')
+    expect(select.run).toContain('unzip -t')
+    expect(upload.run).toContain('gh release upload')
+    expect(upload.run).not.toContain('--clobber')
+    expect(upload.run).toContain('existing {name} digest does not match the selected source artifact')
+    expect(verify.run).toContain('repos/$REPOSITORY/commits/$RELEASE_TAG')
+    expect(verify.run).toContain('release tag commit changed during asset promotion')
+    expect(verify.run).toContain('release asset {name} is missing or has an unexpected digest')
+  })
+})
+
 describe('Python release workflows', () => {
   it('keeps complete wheel validation separate from protected public publication', () => {
     const workflow = loadWorkflow('.github/workflows/python-release.yml')

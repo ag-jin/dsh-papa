@@ -565,6 +565,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'The transport-agnostic host gateway face: it dispatches browser API calls, and each open host stream subscribes to the events it forwards rather than being pushed to through a broadcast verb.',
   },
   {
+    key: 'desktopRuntime',
+    pkg: 'desktop-runtime',
+    title: 'Embedded desktop request transport',
+    mode: 'core',
+    consumers: [],
+    note: 'Owns Electron-window request dispatch, fixed host and mux downlinks, and renderer request cancellation without a network listener.',
+  },
+  {
     key: 'dynamicCordisRunner',
     pkg: 'cordis-host-runner',
     title: 'Dynamic Cordis package host runner',

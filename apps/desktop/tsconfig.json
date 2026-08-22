@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "lib",
+    "types": ["node"]
+  },
+  "include": ["src", "tests"],
+  "references": [
+    { "path": "../../packages/client/modules" },
+    { "path": "../../packages/desktop/runtime" },
+    { "path": "../../packages/bundle/desktop-app" }
+  ]
+}

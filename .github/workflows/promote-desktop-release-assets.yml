@@ -1,0 +1,331 @@
+name: Promote desktop release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful Build desktop applications workflow run ID.
+        required: true
+        type: string
+      release_tag:
+        description: Existing GitHub Release tag for the identical source commit.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: desktop-release-assets-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Authorize desktop artifact promotion
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_run_id: ${{ steps.bind.outputs.source_run_id }}
+      source_head_sha: ${{ steps.bind.outputs.source_head_sha }}
+      release_tag_sha: ${{ steps.bind.outputs.release_tag_sha }}
+      package_version: ${{ steps.bind.outputs.package_version }}
+      release_tag: ${{ steps.bind.outputs.release_tag }}
+      release_prerelease: ${{ steps.bind.outputs.release_prerelease }}
+      darwin_arm64_artifact_id: ${{ steps.bind.outputs.darwin_arm64_artifact_id }}
+      darwin_x64_artifact_id: ${{ steps.bind.outputs.darwin_x64_artifact_id }}
+      win32_x64_artifact_id: ${{ steps.bind.outputs.win32_x64_artifact_id }}
+    steps:
+      - name: Bind source run to release
+        id: bind
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          case "$SOURCE_RUN_ID" in
+            '' | *[!0-9]* | 0)
+              echo '::error::source_run_id must be a positive decimal workflow run ID.'
+              exit 1
+              ;;
+          esac
+          case "$RELEASE_TAG" in
+            '' | *[!A-Za-z0-9._-]*)
+              echo '::error::release_tag may contain only letters, digits, periods, underscores, and hyphens.'
+              exit 1
+              ;;
+          esac
+
+          source_run_file="$(mktemp)"
+          release_file="$(mktemp)"
+          artifacts_file="$(mktemp)"
+          tag_commit_file="$(mktemp)"
+          package_file="$(mktemp)"
+          trap 'rm -f "$source_run_file" "$release_file" "$artifacts_file" "$tag_commit_file" "$package_file"' EXIT
+          gh api "repos/$REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$source_run_file"
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$release_file"
+          # The commits endpoint resolves both lightweight and annotated tags.
+          gh api "repos/$REPOSITORY/commits/$RELEASE_TAG" > "$tag_commit_file"
+          gh api "repos/$REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" > "$artifacts_file"
+
+          source_sha="$(python3 - "$source_run_file" <<'PY'
+          import json
+          import re
+          import sys
+
+          source = json.load(open(sys.argv[1], encoding='utf-8'))
+          sha = source.get('head_sha')
+          if not isinstance(sha, str) or re.fullmatch(r'[0-9a-f]{40}', sha) is None:
+              raise SystemExit('::error::source run returned an invalid head SHA.')
+          print(sha)
+          PY
+          )"
+          gh api "repos/$REPOSITORY/contents/apps/desktop/package.json?ref=$source_sha" \
+            --jq .content | base64 --decode > "$package_file"
+
+          python3 - "$source_run_file" "$release_file" "$artifacts_file" "$tag_commit_file" "$package_file" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import re
+          import sys
+
+          source_path, release_path, artifacts_path, tag_commit_path, package_path, output_path = sys.argv[1:]
+          source = json.load(open(source_path, encoding='utf-8'))
+          release = json.load(open(release_path, encoding='utf-8'))
+          artifacts = json.load(open(artifacts_path, encoding='utf-8'))
+          tag_commit = json.load(open(tag_commit_path, encoding='utf-8'))
+          package = json.load(open(package_path, encoding='utf-8'))
+
+          expected_workflow = '.github/workflows/desktop-macos.yml'
+          if source.get('path') != expected_workflow:
+              raise SystemExit(f'::error::source run must use {expected_workflow}.')
+          if source.get('event') != 'push' or source.get('conclusion') != 'success':
+              raise SystemExit('::error::source run must be a successful push workflow run.')
+
+          source_id = source.get('id')
+          run_number = source.get('run_number')
+          source_sha = source.get('head_sha')
+          if not isinstance(source_id, int) or source_id <= 0:
+              raise SystemExit('::error::source run returned an invalid ID.')
+          if not isinstance(run_number, int) or run_number <= 0:
+              raise SystemExit('::error::source run returned an invalid run number.')
+          if not isinstance(source_sha, str) or re.fullmatch(r'[0-9a-f]{40}', source_sha) is None:
+              raise SystemExit('::error::source run returned an invalid head SHA.')
+
+          release_tag = release.get('tag_name')
+          if not isinstance(release_tag, str) or re.fullmatch(r'[A-Za-z0-9._-]+', release_tag) is None:
+              raise SystemExit('::error::release returned an invalid tag.')
+          release_tag_sha = tag_commit.get('sha')
+          if not isinstance(release_tag_sha, str) or re.fullmatch(r'[0-9a-f]{40}', release_tag_sha) is None:
+              raise SystemExit('::error::release tag returned an invalid commit SHA.')
+          if release_tag_sha != source_sha:
+              raise SystemExit('::error::release tag commit must equal the source run head SHA.')
+          if release.get('draft') is not False:
+              raise SystemExit('::error::release must already be published, not a draft.')
+          if not isinstance(release.get('prerelease'), bool):
+              raise SystemExit('::error::release returned an invalid prerelease state.')
+
+          package_version = package.get('version')
+          if not isinstance(package_version, str) or re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', package_version) is None:
+              raise SystemExit('::error::source desktop package returned an invalid version.')
+
+          expected_names = {
+              target: f'dsh-desktop-{target}-{run_number}'
+              for target in ('darwin-arm64', 'darwin-x64', 'win32-x64')
+          }
+          artifact_list = artifacts.get('artifacts')
+          if not isinstance(artifact_list, list):
+              raise SystemExit('::error::source run returned an invalid artifact list.')
+
+          artifact_ids = {}
+          for target, expected_name in expected_names.items():
+              matches = [
+                  artifact for artifact in artifact_list
+                  if isinstance(artifact, dict) and artifact.get('name') == expected_name
+              ]
+              if len(matches) != 1:
+                  raise SystemExit(f'::error::source run must retain exactly one {expected_name} artifact.')
+              artifact = matches[0]
+              artifact_id = artifact.get('id')
+              if artifact.get('expired') is not False or not isinstance(artifact_id, int) or artifact_id <= 0:
+                  raise SystemExit(f'::error::{expected_name} is expired or invalid.')
+              artifact_ids[target] = artifact_id
+
+          with open(output_path, 'a', encoding='utf-8') as output:
+              output.write(f'source_run_id={source_id}\n')
+              output.write(f'source_head_sha={source_sha}\n')
+              output.write(f'release_tag_sha={release_tag_sha}\n')
+              output.write(f'package_version={package_version}\n')
+              output.write(f'release_tag={release_tag}\n')
+              output.write(f"release_prerelease={str(release['prerelease']).lower()}\n")
+              for target, artifact_id in artifact_ids.items():
+                  output.write(f'{target.replace("-", "_")}_artifact_id={artifact_id}\n')
+          PY
+
+  promote:
+    name: Upload verified desktop release assets
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download Apple Silicon macOS artifact
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.authorize.outputs.darwin_arm64_artifact_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.authorize.outputs.source_run_id }}
+          path: artifacts/darwin-arm64
+
+      - name: Download Intel macOS artifact
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.authorize.outputs.darwin_x64_artifact_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.authorize.outputs.source_run_id }}
+          path: artifacts/darwin-x64
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.authorize.outputs.win32_x64_artifact_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.authorize.outputs.source_run_id }}
+          path: artifacts/win32-x64
+
+      - name: Select final delivery files
+        id: assets
+        env:
+          PACKAGE_VERSION: ${{ needs.authorize.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          version="$PACKAGE_VERSION"
+          mkdir release-assets
+          select_asset() {
+            expected="$1"
+            mapfile -d '' matches < <(find artifacts -type f -name "$expected" -print0)
+            [ "${#matches[@]}" -eq 1 ] || {
+              echo "::error::expected exactly one $expected delivery file."
+              exit 1
+            }
+            [ -s "${matches[0]}" ] || {
+              echo "::error::$expected is empty."
+              exit 1
+            }
+            cp -- "${matches[0]}" "release-assets/$expected"
+          }
+
+          select_asset "DSH-$version-arm64.dmg"
+          select_asset "DSH-$version-x64.dmg"
+          select_asset "DSH-win32-x64-$version.zip"
+          unzip -t "release-assets/DSH-win32-x64-$version.zip"
+          sha256sum release-assets/*
+          {
+            printf 'darwin_arm64=release-assets/DSH-%s-arm64.dmg\n' "$version"
+            printf 'darwin_arm64_sha256=%s\n' "$(sha256sum "release-assets/DSH-$version-arm64.dmg" | cut -d ' ' -f 1)"
+            printf 'darwin_x64=release-assets/DSH-%s-x64.dmg\n' "$version"
+            printf 'darwin_x64_sha256=%s\n' "$(sha256sum "release-assets/DSH-$version-x64.dmg" | cut -d ' ' -f 1)"
+            printf 'win32_x64=release-assets/DSH-win32-x64-%s.zip\n' "$version"
+            printf 'win32_x64_sha256=%s\n' "$(sha256sum "release-assets/DSH-win32-x64-$version.zip" | cut -d ' ' -f 1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload missing release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.authorize.outputs.release_tag }}
+          DARWIN_ARM64_ASSET: ${{ steps.assets.outputs.darwin_arm64 }}
+          DARWIN_ARM64_SHA256: ${{ steps.assets.outputs.darwin_arm64_sha256 }}
+          DARWIN_X64_ASSET: ${{ steps.assets.outputs.darwin_x64 }}
+          DARWIN_X64_SHA256: ${{ steps.assets.outputs.darwin_x64_sha256 }}
+          WIN32_X64_ASSET: ${{ steps.assets.outputs.win32_x64 }}
+          WIN32_X64_SHA256: ${{ steps.assets.outputs.win32_x64_sha256 }}
+        run: |
+          set -euo pipefail
+          release_file="$(mktemp)"
+          trap 'rm -f "$release_file"' EXIT
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$release_file"
+          python3 - "$release_file" \
+            "$DARWIN_ARM64_ASSET" "$DARWIN_ARM64_SHA256" \
+            "$DARWIN_X64_ASSET" "$DARWIN_X64_SHA256" \
+            "$WIN32_X64_ASSET" "$WIN32_X64_SHA256" <<'PY' > upload-paths.txt
+          import json
+          import os
+          import sys
+
+          release_path = sys.argv[1]
+          expected = dict(zip(sys.argv[2::2], sys.argv[3::2], strict=True))
+          release = json.load(open(release_path, encoding='utf-8'))
+          existing = {
+              asset.get('name'): asset.get('digest')
+              for asset in release.get('assets', [])
+              if isinstance(asset, dict) and isinstance(asset.get('name'), str)
+          }
+          for path, digest in expected.items():
+              name = os.path.basename(path)
+              existing_digest = existing.get(name)
+              if existing_digest is None:
+                  print(path)
+              elif existing_digest != f'sha256:{digest}':
+                  raise SystemExit(f'::error::existing {name} digest does not match the selected source artifact.')
+          PY
+          while IFS= read -r asset; do
+            [ -n "$asset" ] || continue
+            gh release upload "$RELEASE_TAG" "$asset" --repo "$REPOSITORY"
+          done < upload-paths.txt
+
+      - name: Verify release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.authorize.outputs.release_tag }}
+          SOURCE_HEAD_SHA: ${{ needs.authorize.outputs.source_head_sha }}
+          RELEASE_TAG_SHA: ${{ needs.authorize.outputs.release_tag_sha }}
+          PACKAGE_VERSION: ${{ needs.authorize.outputs.package_version }}
+          RELEASE_PRERELEASE: ${{ needs.authorize.outputs.release_prerelease }}
+          DARWIN_ARM64_SHA256: ${{ steps.assets.outputs.darwin_arm64_sha256 }}
+          DARWIN_X64_SHA256: ${{ steps.assets.outputs.darwin_x64_sha256 }}
+          WIN32_X64_SHA256: ${{ steps.assets.outputs.win32_x64_sha256 }}
+        run: |
+          set -euo pipefail
+          release_file="$(mktemp)"
+          tag_commit_file="$(mktemp)"
+          trap 'rm -f "$release_file" "$tag_commit_file"' EXIT
+          gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > "$release_file"
+          gh api "repos/$REPOSITORY/commits/$RELEASE_TAG" > "$tag_commit_file"
+          python3 - "$release_file" "$tag_commit_file" <<'PY'
+          import json
+          import os
+          import sys
+
+          release = json.load(open(sys.argv[1], encoding='utf-8'))
+          tag_commit = json.load(open(sys.argv[2], encoding='utf-8'))
+          version = os.environ['PACKAGE_VERSION']
+          expected_assets = {
+              f'DSH-{version}-arm64.dmg': os.environ['DARWIN_ARM64_SHA256'],
+              f'DSH-{version}-x64.dmg': os.environ['DARWIN_X64_SHA256'],
+              f'DSH-win32-x64-{version}.zip': os.environ['WIN32_X64_SHA256'],
+          }
+          actual_assets = {
+              asset.get('name'): asset.get('digest')
+              for asset in release.get('assets', [])
+              if isinstance(asset, dict) and isinstance(asset.get('name'), str)
+          }
+          if release.get('tag_name') != os.environ['RELEASE_TAG']:
+              raise SystemExit('::error::release tag changed during asset promotion.')
+          if tag_commit.get('sha') != os.environ['RELEASE_TAG_SHA'] or tag_commit.get('sha') != os.environ['SOURCE_HEAD_SHA']:
+              raise SystemExit('::error::release tag commit changed during asset promotion.')
+          if release.get('draft') is not False:
+              raise SystemExit('::error::release changed to draft during asset promotion.')
+          if str(release.get('prerelease')).lower() != os.environ['RELEASE_PRERELEASE']:
+              raise SystemExit('::error::release prerelease state changed during asset promotion.')
+          for name, digest in expected_assets.items():
+              if actual_assets.get(name) != f'sha256:{digest}':
+                  raise SystemExit(f'::error::release asset {name} is missing or has an unexpected digest.')
+          PY

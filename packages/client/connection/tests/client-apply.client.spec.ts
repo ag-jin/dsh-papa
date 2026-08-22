@@ -9,6 +9,8 @@ import type { RpcMessage } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
 import { FixtureApiClient } from '../src/client/fixture.ts'
 import { WebApiClient } from '../src/client/web-api-client.ts'
+import { DesktopApiClient } from '../src/client/desktop-api-client.ts'
+import type { DesktopBridge } from '../src/client/desktop-bridge.ts'
 
 type Win = { location?: { hostname: string; search: string; origin?: string } }
 type WebSocketGlobal = { WebSocket?: typeof WebSocket }
@@ -77,6 +79,39 @@ describe('connection client apply', () => {
     const handle = await mount()
     expect(handle.api).toBeInstanceOf(WebApiClient)
     expect(handle.isLoopback).toBe(true)
+  })
+
+  it('keeps fixture first and selects DesktopApiClient only when window.__DSH_DESKTOP__ exists', async () => {
+    const bridge: DesktopBridge = {
+      request: async () => ({ type: 'server-response', rpcId: RpcId('unused'), result: { ok: false, error: { code: 'internal' as const, message: 'no response', details: {} } } }),
+      cancel: () => undefined,
+      subscribe: () => () => undefined,
+      sendCommand: async () => undefined,
+      getWindowState: async () => ({
+        bounds: { x: 0, y: 0, width: 1200, height: 800 },
+        sourceListVisible: true,
+        inspectorVisible: false,
+        sourceListWidth: 280,
+        inspectorWidth: 420,
+      }),
+      setWindowState: async () => undefined,
+    }
+    ;(globalThis as Win).location = { hostname: 'localhost', search: '?fixture' }
+    ;(globalThis as Record<string, unknown>).__DSH_DESKTOP__ = bridge
+    try {
+      expect((await mount()).api).toBeInstanceOf(FixtureApiClient)
+      delete (globalThis as Win).location
+      expect((await mount()).api).toBeInstanceOf(DesktopApiClient)
+      expect((await mount()).isLoopback).toBe(true)
+    } finally {
+      delete (globalThis as Record<string, unknown>).__DSH_DESKTOP__
+    }
+  })
+
+  it('keeps WebApiClient when no desktop bridge exists', async () => {
+    delete (globalThis as Record<string, unknown>).__DSH_DESKTOP__
+    ;(globalThis as Win).location = { hostname: 'localhost', search: '' }
+    expect((await mount()).api).toBeInstanceOf(WebApiClient)
   })
 
   it('reports non-loopback page authority through the connection handle', async () => {

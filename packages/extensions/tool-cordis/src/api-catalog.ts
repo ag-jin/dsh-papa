@@ -459,8 +459,8 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'clientModules',
-    summary: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index tap.',
-    description: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index tap. Construction runs the activation scan synchronously — a malformed declaration or missing bundle among the already-loaded entries aggregates into one loud throw (FAILED fiber; the boot activation audit reports it).',
+    summary: 'The client plugin table service: incremental `dsh.client` scan and wire composition, with bundle route and index tap only when WebServer is composed.',
+    description: 'The client plugin table service: incremental `dsh.client` scan and wire composition, with bundle route and index tap only when WebServer is composed. Construction runs the activation scan synchronously — a malformed declaration or missing bundle among the already-loaded entries aggregates into one loud throw (FAILED fiber; the boot activation audit reports it).',
     methods: [
       {
         signature: 'graph(): WebBootGraph',
@@ -469,8 +469,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the graph served as `window.__DSH_BOOT__`.',
       },
       {
+        signature: 'catalog(): ClientBundleCatalog',
+        description: 'Current host bundle authority for desktop protocol handlers.',
+        parameters: [],
+        returns: 'the catalog for the active composed graph.',
+      },
+      {
         signature: 'clientPath(id: string): string | undefined',
-        description: 'Absolute path of an entry\'s client bundle.',
+        description: 'Absolute path of an authorized active client bundle.',
         parameters: [{ name: 'id', description: 'entry id (package name).' }],
         returns: 'the path, or undefined for an unknown id.',
       },
@@ -601,6 +607,47 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'abstract unset(ref: CredentialRef): Promise<void>',
         description: 'Remove one reference from the provider-managed writable source; removing an absent reference is a no-op. Rejects while a read-only source shadows the reference, like set.',
         parameters: [{ name: 'ref', description: 'the reference to remove.' }],
+      },
+    ],
+  },
+  {
+    key: 'desktopRuntime',
+    summary: 'Owns embedded DSH lifecycle, attached desktop windows, and cancellation.',
+    description: 'Owns embedded DSH lifecycle, attached desktop windows, and cancellation. It accepts only a supplied API proxy; it never creates a DSH web listener.',
+    methods: [
+      {
+        signature: 'async start(): Promise<void>',
+        description: 'Start the embedded runtime and acquire its API proxy.',
+        parameters: [],
+      },
+      {
+        signature: 'attachWindow(windowId: string, publish: DesktopDownlinkPublisher): () => void',
+        description: 'Attach a desktop window and its future downlink publisher.',
+        parameters: [{ name: 'windowId', description: 'Unique sender window identifier.' }, { name: 'publish', description: 'Publisher to own until detach or runtime stop.' }],
+        returns: 'Idempotent detach function.',
+      },
+      {
+        signature: 'async request(windowId: string, request: DesktopRequest): Promise<DesktopResponse>',
+        description: 'Process one request for an attached renderer window.',
+        parameters: [{ name: 'windowId', description: 'Sender window identifier.' }, { name: 'request', description: 'Validated desktop RPC envelope.' }],
+        returns: 'Server response envelope or client-response receipt.',
+      },
+      {
+        signature: 'async cancel(windowId: string, rpcId: string): Promise<void>',
+        description: 'Record an rpc-id cancellation for one attached renderer window.',
+        parameters: [{ name: 'windowId', description: 'Sender window identifier.' }, { name: 'rpcId', description: 'Correlation identifier of the active client request.' }],
+        returns: 'Completion once the matching request has been aborted, if any.',
+      },
+      {
+        signature: 'stop(): Promise<void>',
+        description: 'Stop admission, abort owned work, and await active dispatches and downlinks before reporting stopped.',
+        parameters: [],
+      },
+      {
+        signature: 'snapshot(): DesktopRuntimeSnapshot',
+        description: 'Read immutable desktop runtime state facts.',
+        parameters: [],
+        returns: 'Current lifecycle and embedded transport availability facts.',
       },
     ],
   },
@@ -2849,6 +2896,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
   },
   {
+    name: 'ClientBundleCatalog',
+    declaration: 'export interface ClientBundleCatalog {\n    createBootGraph(): WebBootGraph;\n    resolveBundle(id: string, rev: string): URL;\n    resolveSourceMap(id: string, rev: string): URL;\n    revisionFor(id: string): string;\n}',
+  },
+  {
+    name: 'ClientRequest',
+    declaration: 'export interface ClientRequest {\n    type: \'client-request\';\n    rpcId: RpcId;\n    method: string;\n    payload: unknown;\n}',
+  },
+  {
     name: 'ClientResponse',
     declaration: 'export interface ClientResponse {\n    type: \'client-response\';\n    rpcId: RpcId;\n    result: RpcResult<unknown>;\n}',
   },
@@ -3035,6 +3090,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CredentialRef',
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
+  },
+  {
+    name: 'DesktopDownlinkPublisher',
+    declaration: 'export type DesktopDownlinkPublisher = (message: ServerRequest) => void;',
+  },
+  {
+    name: 'DesktopRequest',
+    declaration: 'export type DesktopRequest = ClientRequest | ClientResponse;',
+  },
+  {
+    name: 'DesktopResponse',
+    declaration: 'export type DesktopResponse = ServerResponse | RpcReceipt;',
+  },
+  {
+    name: 'DesktopRuntimeSnapshot',
+    declaration: 'export interface DesktopRuntimeSnapshot {\n    state: DesktopRuntimeState;\n    apiProxyReady: boolean;\n    webServerPresent: false;\n    error?: string;\n}',
+  },
+  {
+    name: 'DesktopRuntimeState',
+    declaration: 'export type DesktopRuntimeState = \'starting\' | \'ready\' | \'degraded\' | \'stopping\' | \'stopped\';',
   },
   {
     name: 'DiffCallView',
@@ -3851,6 +3926,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SendTeamMessageResult',
     declaration: 'export interface SendTeamMessageResult {\n    readonly messageId: TeamMessageId;\n    readonly status: \'accepted\' | \'queued\';\n}',
+  },
+  {
+    name: 'ServerRequest',
+    declaration: 'export interface ServerRequest {\n    type: \'server-request\';\n    rpcId: RpcId;\n    method: string;\n    payload: unknown;\n}',
   },
   {
     name: 'ServerResponse',

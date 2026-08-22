@@ -23,7 +23,10 @@ The graph is the wire single source between the Node and browser halves: the hos
 interface WebBootEntry {
   /** Entry name == package name. */
   id: string
-  /** Bundle endpoint, '/plugins/<id>/client.js?rev=<rev>'. */
+  /**
+   * Bundle source URL. Browser hosts use '/plugins/<id>/client.js?rev=<rev>'.
+   * Packaged hosts use a catalog-authorized local protocol URL.
+   */
   url: string
   /** Bundle content hash (cache-busting consistency anchor). */
   rev: string
@@ -82,7 +85,7 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 ### `ctx.clientModules` — `ClientModuleRegistry`
 
-The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index tap. Construction runs the activation scan synchronously — a malformed declaration or missing bundle among the already-loaded entries aggregates into one loud throw (FAILED fiber; the boot activation audit reports it).
+The client plugin table service: incremental `dsh.client` scan and wire composition, with bundle route and index tap only when WebServer is composed. Construction runs the activation scan synchronously — a malformed declaration or missing bundle among the already-loaded entries aggregates into one loud throw (FAILED fiber; the boot activation audit reports it).
 
 ```ts cordis-catalog
 /**
@@ -92,7 +95,13 @@ The web plugin table service: incremental `dsh.client` scan + wire composition +
 graph(): WebBootGraph
 
 /**
- * Absolute path of an entry's client bundle.
+ * Current host bundle authority for desktop protocol handlers.
+ * @returns the catalog for the active composed graph.
+ */
+catalog(): ClientBundleCatalog
+
+/**
+ * Absolute path of an authorized active client bundle.
  * @param id - entry id (package name).
  * @returns the path, or undefined for an unknown id.
  */
@@ -122,5 +131,5 @@ onRebuilt(listener: (id: string, rev: string) => void): () => void
 onGraphChanged(listener: () => void): () => void
 ```
 
-Source: [`packages/client/modules/src/index.ts:295`](../../packages/client/modules/src/index.ts)
+Source: [`packages/client/modules/src/index.ts:294`](../../packages/client/modules/src/index.ts)
 <!-- END GENERATED cordis-surface -->
