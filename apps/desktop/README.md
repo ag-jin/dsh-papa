@@ -48,6 +48,8 @@ Run `pnpm run desktop:make:mac` to recreate that application and create `apps/de
 
 The package uses an ad-hoc Electron signature. It has no Developer ID signature or notarization, so macOS may require Control-clicking the application or disk image and choosing Open on a different Mac.
 
+The hardened-runtime signature grants the Electron main process and its Helper app bundles the entitlements needed to load the bundled Electron Framework; the Plugin Helper additionally retains its executable-memory entitlement.
+
 The `Build macOS desktop app` GitHub Actions workflow runs this same command on `macos-14` and retains the application and disk image as an Actions artifact. It does not use Apple credentials or create a GitHub Release.
 
 ## Model Experience

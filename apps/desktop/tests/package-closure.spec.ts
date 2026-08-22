@@ -1,5 +1,6 @@
 import { existsSync, lstatSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -9,11 +10,39 @@ interface PackageManifest {
   dependencies?: Record<string, string>
 }
 
+interface ForgeConfig {
+  packagerConfig: {
+    osxSign: {
+      optionsForFile(path: string): { entitlements?: string[] }
+    }
+  }
+}
+
+const require = createRequire(import.meta.url)
+
 async function manifest(path: string): Promise<PackageManifest> {
   return JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8')) as PackageManifest
 }
 
 describe('desktop packaged dependency closure', () => {
+  it('disables library validation for every Electron application process', () => {
+    const config = require('../forge.config.cjs') as ForgeConfig
+    const optionsForFile = config.packagerConfig.osxSign.optionsForFile
+    const processEntitlements = [
+      'com.apple.security.cs.allow-jit',
+      'com.apple.security.cs.disable-library-validation',
+    ]
+    const pluginEntitlements = [
+      'com.apple.security.cs.disable-library-validation',
+      'com.apple.security.cs.allow-unsigned-executable-memory',
+    ]
+
+    expect(optionsForFile('/stage/DSH.app')).toEqual({ entitlements: processEntitlements })
+    expect(optionsForFile('/stage/DSH.app/Contents/Frameworks/DSH Helper.app')).toEqual({ entitlements: processEntitlements })
+    expect(optionsForFile('/stage/DSH.app/Contents/Frameworks/DSH Helper (Plugin).app')).toEqual({ entitlements: pluginEntitlements })
+    expect(optionsForFile('/stage/DSH.app/Contents/Frameworks/Electron Framework.framework')).toEqual({})
+  })
+
   it('declares every base and desktop patch loader dependency at the application root', async () => {
     const [desktop, base, patch, cordis] = await Promise.all([
       manifest('../package.json'),

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-17-desktop-runtime-no-listener.md
-2026-08-17-desktop-runtime-no-listener.md: db620aa38f89d2199d76f5c9b0f7ceffecd7944b
-2026-08-17-desktop-runtime-no-listener.zh.md: 10313462bca537f02708a99c1806095e6611ffb0
+2026-08-17-desktop-runtime-no-listener.md: f425e3664ee553f864a4b653b462264618d4ed12
+2026-08-17-desktop-runtime-no-listener.zh.md: 9ad9264e2f39f10b695474465b794df1400beaf1

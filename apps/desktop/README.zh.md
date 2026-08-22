@@ -48,6 +48,8 @@ DSH 仍然拥有 credentials、transcript、session、tool result、setting 和 
 
 该包使用 Electron 的 ad-hoc 签名，没有 Developer ID 签名，也未公证。因此在其他 Mac 上，可能需要按住 Control 点击应用或磁盘映像，然后选择“打开”。
 
+hardened-runtime 签名会向 Electron 主进程及其 Helper app bundle 授予加载内置 Electron Framework 所需的 entitlement；Plugin Helper 还会保留其 executable-memory entitlement。
+
 `Build macOS desktop app` GitHub Actions workflow 会在 `macos-14` 上运行同一命令，并将应用和磁盘映像保留为 Actions artifact。它不会使用 Apple 凭据，也不会创建 GitHub Release。
 
 ## 模型体验

@@ -66,8 +66,23 @@ jobs:
           test -d "$app/Contents/Resources/app.asar.unpacked/node_modules/@standard-schema/spec"
           test -n "$dmg"
           codesign --verify --deep --strict "$app"
-          codesign --display --entitlements :- "$app" | plutil -extract com.apple.security.cs.allow-jit raw -expect true -
-          codesign --display --entitlements :- "$app" | plutil -extract com.apple.security.cs.disable-library-validation raw -expect true -
+          assert_entitlement() {
+            target=$1
+            entitlement=$2
+            codesign --display --entitlements :- "$target" 2>/dev/null \
+              | plutil -convert json -o - - \
+              | jq -e --arg entitlement "$entitlement" '.[$entitlement] == true'
+          }
+          for target in \
+            "$app" \
+            "$app/Contents/Frameworks/DSH Helper.app" \
+            "$app/Contents/Frameworks/DSH Helper (GPU).app" \
+            "$app/Contents/Frameworks/DSH Helper (Renderer).app"; do
+            assert_entitlement "$target" com.apple.security.cs.allow-jit
+            assert_entitlement "$target" com.apple.security.cs.disable-library-validation
+          done
+          assert_entitlement "$app/Contents/Frameworks/DSH Helper (Plugin).app" com.apple.security.cs.disable-library-validation
+          assert_entitlement "$app/Contents/Frameworks/DSH Helper (Plugin).app" com.apple.security.cs.allow-unsigned-executable-memory
           hdiutil verify "$dmg"
 
       - uses: actions/upload-artifact@v7

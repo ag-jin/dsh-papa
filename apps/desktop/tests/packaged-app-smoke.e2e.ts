@@ -10,7 +10,8 @@ import { chromium, type Browser, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api'
 
-const APPLICATION_EXECUTABLE = fileURLToPath(new URL('../out/DSH-darwin-arm64/DSH.app/Contents/MacOS/DSH', import.meta.url))
+const APPLICATION_EXECUTABLE = process.env.DSH_DESKTOP_APPLICATION_PATH
+  ?? fileURLToPath(new URL('../out/DSH-darwin-arm64/DSH.app/Contents/MacOS/DSH', import.meta.url))
 const packagedApplicationAvailable = process.platform === 'darwin' && process.arch === 'arm64' && existsSync(APPLICATION_EXECUTABLE)
 
 /** Reserves an ephemeral loopback port for the Chromium CDP test attachment. */

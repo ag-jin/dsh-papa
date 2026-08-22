@@ -1,6 +1,15 @@
-/** Electron Forge configuration for the unsigned macOS arm64 desktop package. */
+/** Electron Forge configuration for the ad-hoc signed macOS arm64 desktop package. */
 
-const { join } = require('node:path')
+const { basename, join } = require('node:path')
+
+const electronProcessEntitlements = [
+  'com.apple.security.cs.allow-jit',
+  'com.apple.security.cs.disable-library-validation',
+]
+const pluginHelperEntitlements = [
+  'com.apple.security.cs.disable-library-validation',
+  'com.apple.security.cs.allow-unsigned-executable-memory',
+]
 
 module.exports = {
   outDir: process.env.DSH_DESKTOP_FORGE_OUT ?? join(__dirname, 'out'),
@@ -19,15 +28,12 @@ module.exports = {
       identityValidation: false,
       preAutoEntitlements: false,
       optionsForFile: filePath => {
-        if (!filePath.includes('.app/')) {
-          return {
-            entitlements: [
-              'com.apple.security.cs.allow-jit',
-              'com.apple.security.cs.disable-library-validation',
-            ],
-          }
+        if (!filePath.endsWith('.app')) return {}
+        return {
+          entitlements: basename(filePath) === 'DSH Helper (Plugin).app'
+            ? pluginHelperEntitlements
+            : electronProcessEntitlements,
         }
-        return {}
       },
     },
     prune: false,
