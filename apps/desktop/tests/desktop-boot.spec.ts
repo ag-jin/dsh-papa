@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import { bootDesktopRuntime } from '../src/desktop-boot.ts'
@@ -43,7 +43,7 @@ describe('desktop runtime boot', () => {
       fiber: { dispose },
       get: vi.fn((name: string) => name === 'desktopRuntime' ? runtime : name === 'clientModules' ? { catalog: () => catalog } : undefined),
     }
-    const resolveBundleDir = vi.fn((_name: string, packageName: string, _installAnchor: string, _packageRoot: string) => '/bundles/' + packageName)
+    const resolveBundleDir = vi.fn((_name: string, packageName: string, _installAnchor: string, _packageRoot: string) => join('/bundles', packageName))
     const loadOverlayPatches = vi.fn((_name: string, path: string) => [{ id: path }])
     const boot = vi.fn(async () => context)
 
@@ -57,8 +57,8 @@ describe('desktop runtime boot', () => {
 
     expect(resolveBundleDir.mock.calls.map(call => call[3])).toEqual(['/app', '/app'])
     expect(loadOverlayPatches.mock.calls.map(call => call[1])).toEqual([
-      '/bundles/@deepseek-ai/dsh-base/cordis.patch.yml',
-      '/bundles/@deepseek-ai/dsh-desktop-app/cordis.patch.yml',
+      join('/bundles', '@deepseek-ai/dsh-base', 'cordis.patch.yml'),
+      join('/bundles', '@deepseek-ai/dsh-desktop-app', 'cordis.patch.yml'),
     ])
     const finalPresetPatch = { id: 'agent-presets', config: { default: 'standard', roots: [{ path: '/app/config/agent-presets', trust: 'system' }] } }
     expect(boot).toHaveBeenCalledWith('dsh-desktop', '/app/config/cordis.yml', expect.arrayContaining([

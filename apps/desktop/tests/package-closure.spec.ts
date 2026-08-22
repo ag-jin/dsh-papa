@@ -93,13 +93,13 @@ describe('desktop packaged dependency closure', () => {
       await mkdir(join(framework, 'Versions', 'A'), { recursive: true })
       await writeFile(join(framework, 'Versions', 'A', 'Electron Framework'), '')
       await symlink('A', join(framework, 'Versions', 'Current'))
-      await symlink('Versions/Current/Electron Framework', join(framework, 'Electron Framework'))
+      await symlink(join('Versions', 'Current', 'Electron Framework'), join(framework, 'Electron Framework'))
 
       copyApplicationForDiskImage(source, destination)
 
       expect(await readlink(join(destination, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Versions', 'Current'))).toBe('A')
       expect(await readlink(join(destination, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Electron Framework')))
-        .toBe('Versions/Current/Electron Framework')
+        .toBe(join('Versions', 'Current', 'Electron Framework'))
     } finally {
       await rm(root, { recursive: true, force: true })
     }
