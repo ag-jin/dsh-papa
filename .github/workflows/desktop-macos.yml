@@ -35,7 +35,9 @@ jobs:
           - target: darwin-x64
             platform: darwin
             arch: x64
-            runner: macos-13
+            # macos-13 is retired; macos-latest is ARM64, so use the supported
+            # native Intel label for the darwin-x64 dependency closure.
+            runner: macos-15-intel
             makeScript: desktop:make:mac
           - target: win32-x64
             platform: win32
