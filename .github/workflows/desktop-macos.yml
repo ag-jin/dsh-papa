@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: desktop-package-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   DSH_TELEMETRY_DISABLED: '1'
@@ -74,8 +74,7 @@ jobs:
         env:
           DSH_DESKTOP_PLATFORM: ${{ matrix.platform }}
           DSH_DESKTOP_ARCH: ${{ matrix.arch }}
-          DSH_DESKTOP_DELIVERY_DIR: ${{ runner.temp }}/dsh-desktop-delivery-${{ matrix.target }}
-        run: pnpm run desktop:materialize:delivery
+        run: node apps/desktop/scripts/materialize-desktop-delivery.mjs
 
       - name: Run packaged application smoke
         env:
@@ -86,7 +85,7 @@ jobs:
         env:
           DSH_DESKTOP_PLATFORM: ${{ matrix.platform }}
           DSH_DESKTOP_ARCH: ${{ matrix.arch }}
-        run: pnpm run desktop:verify:artifacts
+        run: node apps/desktop/scripts/verify-desktop-artifacts.mjs
 
       - name: Upload macOS artifact
         if: matrix.platform == 'darwin'
