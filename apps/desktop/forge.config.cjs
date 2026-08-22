@@ -1,4 +1,4 @@
-/** Electron Forge configuration for the ad-hoc signed macOS arm64 desktop package. */
+/** Electron Forge configuration for the natively packaged DSH desktop application. */
 
 const { basename, join } = require('node:path')
 
@@ -42,5 +42,13 @@ module.exports = {
     force: true,
     mode: 'sequential',
   },
-  makers: [],
+  makers: [
+    {
+      // The staged runtime hosts only production dependencies, so the maker
+      // entry resolves from the packager installation when forge runs in the stage.
+      name: process.env.DSH_DESKTOP_FORGE_MAKER_ZIP ?? '@electron-forge/maker-zip',
+      config: {},
+      platforms: ['win32'],
+    },
+  ],
 }

@@ -1,4 +1,4 @@
-# macOS Desktop GUI Design
+# DSH Desktop GUI Design
 
 [English](2026-08-17-macos-desktop-gui-design.md) | 中文
 
@@ -12,9 +12,9 @@
 
 ## 产品决策
 
-首个版本面向运行 macOS 14 或更高版本的 Apple silicon 系统，与仓库现有 macOS runtime distribution 保持一致。Intel 支持、移动客户端、Mac App Store 分发、自动更新、跨设备同步和自定义主题不在此版本范围内。
+DSH Desktop 将原生 `darwin-arm64` 和 `darwin-x64` build 作为 ad-hoc 签名应用与压缩磁盘映像分发，并提供未签名的 `win32-x64` 便携 ZIP。每个 target 都在匹配的 runner 上构建 native-module closure。移动客户端、Mac App Store 分发、自动更新、跨设备同步、自定义主题、Windows 代码签名和 Windows 安装器不在此版本范围内。
 
-DSH Desktop 以 ad-hoc 签名的应用和压缩磁盘映像分发，没有 Developer ID 签名，也未公证。Mac App Store sandbox 与 DSH 在用户明确控制的权限下提供的广泛本地文件系统和 shell 访问不兼容。
+macOS build 没有 Developer ID 签名，也未公证。Mac App Store sandbox 与 DSH 在用户明确控制的权限下提供的广泛本地文件系统和 shell 访问不兼容。Windows ZIP 需要解压到可写的本地目录；由于未签名，可能触发 SmartScreen。
 
 工作区是主窗口的主要身份。Session 属于工作区。开发者可以打开多个工作区窗口；应用重新启动后会恢复工作区、选中的 session、sidebar 状态、inspector 状态和 panel 宽度。
 
@@ -102,7 +102,7 @@ Client coverage 继续通过 pnpm run test:gui。它包括 desktop connection st
 
 Desktop integration tests 针对 fixture DSH composition 启动 Electron application。它们创建并恢复 session，执行 streaming events，运行受控 tool，打开 Files 和 Changes inspector，传递 approval request，停止 run，模拟 renderer reload，并验证没有打开 LAN socket。
 
-macOS smoke coverage 在 Apple silicon 上启动 packaged application，检查 application startup、standard keyboard commands、native file selection、window restoration、runtime restart 后的 recovery、ad-hoc signature integrity 和 disk-image integrity。
+Native-runner smoke coverage 启动从最终 delivery artifact materialize 的每个 application，再检查 startup、bridge access、embedded session request 和 listener absence。macOS coverage 验证 ad-hoc signature 与从挂载 disk image 得到的 application；Windows coverage 验证未签名的便携 ZIP 与其解压后的 application。
 
 ## 验收标准
 

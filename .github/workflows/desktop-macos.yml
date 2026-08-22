@@ -1,4 +1,4 @@
-name: Build macOS desktop app
+name: Build desktop applications
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-macos-${{ github.ref }}
+  group: desktop-package-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -20,9 +20,28 @@ env:
 
 jobs:
   package:
-    name: Package macOS 14 arm64 desktop app
-    runs-on: macos-14
+    name: Package ${{ matrix.target }} desktop app
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            platform: darwin
+            arch: arm64
+            runner: macos-14
+            makeScript: desktop:make:mac
+          - target: darwin-x64
+            platform: darwin
+            arch: x64
+            runner: macos-13
+            makeScript: desktop:make:mac
+          - target: win32-x64
+            platform: win32
+            arch: x64
+            runner: windows-latest
+            makeScript: desktop:make:win
     steps:
       - uses: actions/checkout@v6
         with:
@@ -41,55 +60,50 @@ jobs:
       - name: Run desktop unit tests
         run: pnpm --filter @deepseek-ai/dsh-desktop run test
 
-      - name: Package application and disk image
-        run: pnpm run desktop:make:mac
+      - name: Package application artifact
+        env:
+          DSH_DESKTOP_PLATFORM: ${{ matrix.platform }}
+          DSH_DESKTOP_ARCH: ${{ matrix.arch }}
+        run: pnpm run ${{ matrix.makeScript }}
 
       - name: Run assembled Electron acceptance test
         run: node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/assembled-transport.e2e.ts
 
+      - name: Materialize delivery artifact
+        id: delivery
+        env:
+          DSH_DESKTOP_PLATFORM: ${{ matrix.platform }}
+          DSH_DESKTOP_ARCH: ${{ matrix.arch }}
+          DSH_DESKTOP_DELIVERY_DIR: ${{ runner.temp }}/dsh-desktop-delivery-${{ matrix.target }}
+        run: pnpm run desktop:materialize:delivery
+
       - name: Run packaged application smoke
+        env:
+          DSH_DESKTOP_APPLICATION_PATH: ${{ steps.delivery.outputs.application-path }}
         run: node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/packaged-app-smoke.e2e.ts
 
       - name: Verify packaged artifacts
-        run: |
-          set -euo pipefail
-          app='apps/desktop/out/DSH-darwin-arm64/DSH.app'
-          dmg=$(find apps/desktop/out -maxdepth 1 -name 'DSH-*-arm64.dmg' -type f -print -quit)
-          test -d "$app"
-          test -f "$app/Contents/Info.plist"
-          test -f "$app/Contents/Frameworks/Electron Framework.framework/Electron Framework"
-          test -f "$app/Contents/Resources/app.asar"
-          test -d "$app/Contents/Resources/app.asar.unpacked/node_modules"
-          test -f "$app/Contents/Resources/config/cordis.yml"
-          test -f "$app/Contents/Resources/renderer/index.html"
-          test -d "$app/Contents/Resources/app.asar.unpacked/node_modules/@deepseek-ai/cosmokit"
-          test -d "$app/Contents/Resources/app.asar.unpacked/node_modules/@standard-schema/spec"
-          test -n "$dmg"
-          codesign --verify --deep --strict "$app"
-          assert_entitlement() {
-            target=$1
-            entitlement=$2
-            codesign --display --entitlements :- "$target" 2>/dev/null \
-              | plutil -convert json -o - - \
-              | jq -e --arg entitlement "$entitlement" '.[$entitlement] == true'
-          }
-          for target in \
-            "$app" \
-            "$app/Contents/Frameworks/DSH Helper.app" \
-            "$app/Contents/Frameworks/DSH Helper (GPU).app" \
-            "$app/Contents/Frameworks/DSH Helper (Renderer).app"; do
-            assert_entitlement "$target" com.apple.security.cs.allow-jit
-            assert_entitlement "$target" com.apple.security.cs.disable-library-validation
-          done
-          assert_entitlement "$app/Contents/Frameworks/DSH Helper (Plugin).app" com.apple.security.cs.disable-library-validation
-          assert_entitlement "$app/Contents/Frameworks/DSH Helper (Plugin).app" com.apple.security.cs.allow-unsigned-executable-memory
-          hdiutil verify "$dmg"
+        env:
+          DSH_DESKTOP_PLATFORM: ${{ matrix.platform }}
+          DSH_DESKTOP_ARCH: ${{ matrix.arch }}
+        run: pnpm run desktop:verify:artifacts
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload macOS artifact
+        if: matrix.platform == 'darwin'
+        uses: actions/upload-artifact@v7
         with:
-          name: dsh-desktop-macos-arm64-${{ github.run_number }}
+          name: dsh-desktop-${{ matrix.target }}-${{ github.run_number }}
           path: |
-            apps/desktop/out/DSH-darwin-arm64/DSH.app
-            apps/desktop/out/DSH-*-arm64.dmg
+            apps/desktop/out/DSH-${{ matrix.target }}/DSH.app
+            apps/desktop/out/DSH-*-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows artifact
+        if: matrix.platform == 'win32'
+        uses: actions/upload-artifact@v7
+        with:
+          name: dsh-desktop-${{ matrix.target }}-${{ github.run_number }}
+          path: apps/desktop/out/make/zip/win32/x64/DSH-win32-x64-*.zip
           if-no-files-found: error
           retention-days: 14

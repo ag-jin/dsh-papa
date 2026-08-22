@@ -1,35 +1,57 @@
-/** Assemble the standalone runtime and renderer consumed by the macOS packager. */
+/** Assemble the standalone runtime and renderer consumed by the desktop packagers. */
 
 import { spawnSync } from 'node:child_process'
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { requireNativeHost, requireSupportedHost, resolveTarget } from './desktop-target.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopDirectory = resolve(scriptDirectory, '..')
 const repositoryRoot = resolve(desktopDirectory, '../..')
 const stageDirectory = resolve(process.env.DSH_DESKTOP_STAGE_DIR ?? join(tmpdir(), `dsh-desktop-stage-${process.pid}`))
 
-function run(command, args, cwd = repositoryRoot, environment = process.env) {
-  const result = spawnSync(command, args, { cwd, env: environment, stdio: 'inherit' })
-  if (result.error !== undefined) throw result.error
-  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited with ${String(result.status ?? result.signal)}`)
+/**
+ * Resolves a package-manager launch without executing a Windows command wrapper through a shell.
+ * @param {string} command - Requested package-manager command.
+ * @param {string[]} args - Requested command arguments.
+ * @param {NodeJS.ProcessEnv} [environment] - Process environment to inspect.
+ * @param {string} [platform] - Host platform to resolve for.
+ * @returns {{ command: string, args: string[] }} Node executable and arguments to launch.
+ */
+export function resolvePackageManagerLaunch(command, args, environment = process.env, platform = process.platform) {
+  if (platform !== 'win32' || (command !== 'npm' && command !== 'pnpm')) return { command, args }
+  const pnpmCli = environment.npm_execpath
+  if (pnpmCli === undefined || pnpmCli === '') {
+    throw new Error('dsh-desktop: Windows staging must run through pnpm so its CLI entry is available')
+  }
+  if (command === 'npm') {
+    if (args[0] === 'run') return { command: process.execPath, args: [pnpmCli, 'run', ...args.slice(1)] }
+    if (args[0] === '--prefix' && args[2] === 'run') {
+      return { command: process.execPath, args: [pnpmCli, '--dir', args[1], 'run', ...args.slice(3)] }
+    }
+    throw new Error(`dsh-desktop: unsupported npm invocation ${args.join(' ')}`)
+  }
+  return { command: process.execPath, args: [pnpmCli, ...args] }
 }
 
-function requireDarwinArm64() {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
-    throw new Error('dsh-desktop: macOS packaging requires a Darwin arm64 host')
-  }
+function run(command, args, cwd = repositoryRoot, environment = process.env) {
+  const launcher = resolvePackageManagerLaunch(command, args, environment)
+  const result = spawnSync(launcher.command, launcher.args, { cwd, env: environment, stdio: 'inherit' })
+  if (result.error !== undefined) throw result.error
+  if (result.status !== 0) throw new Error(`${launcher.command} ${launcher.args.join(' ')} exited with ${String(result.status ?? result.signal)}`)
 }
 
 function findSymlink(directory) {
@@ -85,6 +107,12 @@ function copyWithoutNestedNodeModules(source, destination) {
   })
 }
 
+function removeStagedPath(path) {
+  if (!existsSync(path)) return
+  if (lstatSync(path).isSymbolicLink()) unlinkSync(path)
+  else rmSync(path, { recursive: true, force: true })
+}
+
 /**
  * Fill dependencies omitted by legacy deploy from the source production installation graph.
  * @param {string} sourceManifest - Manifest at the source production root.
@@ -117,7 +145,7 @@ export function materializeProductionClosure(sourceManifest, targetDirectory) {
         const destination = existsSync(rootManifest) && !samePackage(sourceDependencyManifest, rootManifest)
           ? join(dirname(targetParentManifest), 'node_modules', packageName)
           : rootDestination
-        rmSync(destination, { recursive: true, force: true })
+        removeStagedPath(destination)
         mkdirSync(dirname(destination), { recursive: true })
         copyWithoutNestedNodeModules(dirname(sourceDependencyManifest), destination)
         targetDependencyManifest = join(destination, 'package.json')
@@ -159,7 +187,7 @@ function materializeStagedLinks() {
       rmSync(join(nodeModules, ...segments.slice(0, binIndex + 1)), { recursive: true, force: true })
     } else {
       const source = realpathSync(remaining)
-      rmSync(remaining, { recursive: true, force: true })
+      unlinkSync(remaining)
       copyWithoutNestedNodeModules(source, remaining)
     }
     remaining = findSymlink(nodeModules)
@@ -219,7 +247,8 @@ function assertStagedResources() {
 }
 
 function main() {
-  requireDarwinArm64()
+  requireSupportedHost()
+  requireNativeHost(resolveTarget())
   run('npm', ['run', 'build:lib:host'])
   run('npm', ['run', 'build:lib:client'])
   run('npm', ['--prefix', join(repositoryRoot, 'apps', 'web'), 'run', 'build'])
@@ -244,7 +273,7 @@ function main() {
   removeSourceMaps(stageDirectory)
   writeStageManifest()
   assertStagedResources()
-  console.log(`dsh-desktop: staged macOS runtime at ${stageDirectory}`)
+  console.log(`dsh-desktop: staged desktop runtime at ${stageDirectory}`)
 }
 
 if (process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main()

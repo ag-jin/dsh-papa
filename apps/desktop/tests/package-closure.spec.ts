@@ -1,10 +1,12 @@
 import { existsSync, lstatSync } from 'node:fs'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { materializeProductionClosure } from '../scripts/stage-mac.mjs'
+import { copyApplicationForDiskImage } from '../scripts/make-macos-dmg.mjs'
+import { materializeProductionClosure } from '../scripts/stage-desktop.mjs'
+import { verifyMaterializedApplication } from '../scripts/verify-desktop-artifacts.mjs'
 
 interface PackageManifest {
   dependencies?: Record<string, string>
@@ -16,6 +18,11 @@ interface ForgeConfig {
       optionsForFile(path: string): { entitlements?: string[] }
     }
   }
+  makers: Array<{
+    name: string
+    config: object
+    platforms: string[]
+  }>
 }
 
 const require = createRequire(import.meta.url)
@@ -27,7 +34,7 @@ async function manifest(path: string): Promise<PackageManifest> {
 describe('desktop packaged dependency closure', () => {
   it('disables library validation for every Electron application process', () => {
     const config = require('../forge.config.cjs') as ForgeConfig
-    const optionsForFile = config.packagerConfig.osxSign.optionsForFile
+    const optionsForFile = (path: string) => config.packagerConfig.osxSign.optionsForFile(path)
     const processEntitlements = [
       'com.apple.security.cs.allow-jit',
       'com.apple.security.cs.disable-library-validation',
@@ -41,6 +48,12 @@ describe('desktop packaged dependency closure', () => {
     expect(optionsForFile('/stage/DSH.app/Contents/Frameworks/DSH Helper.app')).toEqual({ entitlements: processEntitlements })
     expect(optionsForFile('/stage/DSH.app/Contents/Frameworks/DSH Helper (Plugin).app')).toEqual({ entitlements: pluginEntitlements })
     expect(optionsForFile('/stage/DSH.app/Contents/Frameworks/Electron Framework.framework')).toEqual({})
+  })
+
+  it('declares the versioned ZIP maker only for Windows targets', () => {
+    const config = require('../forge.config.cjs') as ForgeConfig
+
+    expect(config.makers).toEqual([{ name: '@electron-forge/maker-zip', config: {}, platforms: ['win32'] }])
   })
 
   it('declares every base and desktop patch loader dependency at the application root', async () => {
@@ -69,6 +82,43 @@ describe('desktop packaged dependency closure', () => {
       .flatMap(match => match[1] === undefined ? [] : [match[1]]))]
 
     expect(names.filter(name => desktop.dependencies?.[name] === undefined)).toEqual([])
+  })
+
+  it('preserves Electron Framework relative links in the disk-image source bundle', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-desktop-dmg-links-'))
+    const source = join(root, 'source', 'DSH.app')
+    const destination = join(root, 'destination', 'DSH.app')
+    const framework = join(source, 'Contents', 'Frameworks', 'Electron Framework.framework')
+    try {
+      await mkdir(join(framework, 'Versions', 'A'), { recursive: true })
+      await writeFile(join(framework, 'Versions', 'A', 'Electron Framework'), '')
+      await symlink('A', join(framework, 'Versions', 'Current'))
+      await symlink('Versions/Current/Electron Framework', join(framework, 'Electron Framework'))
+
+      copyApplicationForDiskImage(source, destination)
+
+      expect(await readlink(join(destination, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Versions', 'Current'))).toBe('A')
+      expect(await readlink(join(destination, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Electron Framework')))
+        .toBe('Versions/Current/Electron Framework')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an extracted Windows delivery directory with missing runtime resources', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-desktop-delivery-layout-'))
+    try {
+      await writeFile(join(root, 'DSH.exe'), '')
+
+      expect(() => {
+        verifyMaterializedApplication(
+          { target: 'win32-x64', platform: 'win32', arch: 'x64' },
+          root,
+        )
+      }).toThrow(/resources[\\/]app\.asar/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('materializes transitive production peers without development dependencies', async () => {

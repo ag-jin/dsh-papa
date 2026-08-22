@@ -14,7 +14,7 @@ Status: implemented
 
 `@deepseek-ai/dsh-desktop-app` 通过补丁组合扩展基础应用。它包含客户端功能条目、API proxy、模块注册表、连接包和桌面运行时，但排除浏览器服务器、静态资源、启动、运行时、HMR 和 HTTP Origin 信任条目。因此，`ClientModuleRegistry` 与 connection core 都将 `webServer` 视为可选服务：catalog 和启动图组合仍可供桌面协议处理器使用，而浏览器路由、index 注入、`/api` 和 WebSocket 下行流只在组合该服务时存在。桌面补丁直接选择 native directory-picker provider，而非依赖 bind host 的 auto selector；它注册拒绝 `webServer` 的 bundle-level invariant，并以每个桌面会话的 `standard` agent preset 取代基础模型可见条目。
 
-`apps/desktop` 在 app-boot preparation 中安装 `InvariantRegistry`，通过 `createRequire(package.json)` 将 bare base 和 desktop patch entry name 解析为 absolute module，随后在空的打包根配置之上启动这些 patch file，并把随包提供的 `standard` preset directory 加入为 system root。它在 application root 声明 base 和 desktop patch dependency union 以及 direct bootstrap provider，使此解析能在 Loader 导入 entry 前完成。它的 Electron 进程会在 ready 前注册 privileged `dsh-app` 和 `dsh-client` scheme，只在 realpath containment check 通过后提供 renderer file，将 active catalog boot graph 注入 renderer HTML，并只通过 `ClientBundleCatalog` 解析 bundle asset。主进程为每个窗口提供 sandboxed、context-isolated renderer，并禁用 Node integration 和单个打包后的 CommonJS preload bridge。response CSP 保持 `connect-src 'none'`，同时允许注入的本地 bootstrap script、已授权客户端 bundle、Loader expression evaluation 和打包的 data font。它的五个 IPC handler 将 Electron sender id 绑定给 `DesktopBridgeAuthority`；Electron-local state 只包含有界的 desktop view preference 和 window geometry，部分 renderer update 会与当前归一化状态合并。ad-hoc hardened-runtime 签名会向主进程和非 Plugin Helper app bundle 授予 JIT 及 library-validation 例外；Plugin Helper 则获得其所需的 executable-memory 与 library-validation 例外。
+`apps/desktop` 在 app-boot preparation 中安装 `InvariantRegistry`，通过 `createRequire(package.json)` 将 bare base 和 desktop patch entry name 解析为 absolute module，随后在空的打包根配置之上启动这些 patch file，并把随包提供的 `standard` preset directory 加入为 system root。它在 application root 声明 base 和 desktop patch dependency union 以及 direct bootstrap provider，使此解析能在 Loader 导入 entry 前完成。它的 Electron 进程会在 ready 前注册 privileged `dsh-app` 和 `dsh-client` scheme，只在 realpath containment check 通过后提供 renderer file，将 active catalog boot graph 注入 renderer HTML，并只通过 `ClientBundleCatalog` 解析 bundle asset。主进程为每个窗口提供 sandboxed、context-isolated renderer，并禁用 Node integration 和单个打包后的 CommonJS preload bridge。response CSP 保持 `connect-src 'none'`，同时允许注入的本地 bootstrap script、已授权客户端 bundle、Loader expression evaluation 和打包的 data font。它的五个 IPC handler 将 Electron sender id 绑定给 `DesktopBridgeAuthority`；Electron-local state 只包含有界的 desktop view preference 和 window geometry，部分 renderer update 会与当前归一化状态合并。`darwin-arm64`、`darwin-x64` 和 `win32-x64` package 会在匹配的 host 上构建 production native-module closure，并拒绝 cross-host staging。Darwin package 使用 ad-hoc hardened-runtime 签名：主进程和非 Plugin Helper app bundle 获得 JIT 与 library-validation 例外，Plugin Helper 获得 executable-memory 与 library-validation 例外。Windows package 是未签名的便携 ZIP；artifact workflow 只拥有只读仓库访问权限，且永不创建 release。
 
 ## Alternatives considered
 
@@ -24,10 +24,14 @@ Status: implemented
 
 **为桌面复制客户端模块图。** 这会在浏览器与桌面之间分裂 bundle revision 和路径校验。共享 catalog 仍是活动客户端 bundle 的唯一权威。
 
+**交叉构建复制后的 production closure。** 这会将 Electron executable 与为其他 host 选择的 `sharp`、`koffi` 或 `node-pty` binary 配对。每个 artifact 改为在自己的 native runner 上 build 和 rebuild。
+
+**交付 Windows 安装器。** 安装器会增加 uninstall 和 upgrade 行为，但不能解决未签名分发的警告。当前 Windows deliverable 保持为透明的 portable ZIP。
+
 ## Consequences
 
-桌面调用方在没有 DSH 监听器的情况下使用与浏览器调用方相同的 API 请求和流语义。Electron 主进程拥有打包资源交付、每窗口 bridge attach、response CSP 和 desktop-local view state，浏览器专用服务仍位于桌面补丁之外。
+桌面调用方在没有 DSH 监听器的情况下使用与浏览器调用方相同的 API 请求和流语义。Electron 主进程拥有打包资源交付、每窗口 bridge attach、response CSP 和 desktop-local view state，浏览器专用服务仍位于桌面补丁之外。每个平台都有独立测试的 artifact：macOS 是 ad-hoc 签名、未公证的 application 与 disk image；Windows 是未签名的 portable ZIP。
 
 ## Verification
 
-运行时包验证一元分发、回执、取消、格式错误的 bridge 输入、按窗口的流终止、运行时 invariant、真实 Cordis 插件挂载与释放、包 invariant 和桌面补丁解析器闭包。桌面应用验证 protocol containment 和 catalog authorization、boot-manifest injection、preload allowlisting、window security option 和 CSP、固定 IPC registration、listener-free patch boot、归一化的 desktop-local state、每种 Helper 的 entitlement 选择，以及通过打包 renderer、bridge、runtime request 和 standard-preset session 创建的真实 ad-hoc 签名应用。
+运行时包验证一元分发、回执、取消、格式错误的 bridge 输入、按窗口的流终止、运行时 invariant、真实 Cordis 插件挂载与释放、包 invariant 和桌面补丁解析器闭包。桌面应用验证 protocol containment 和 catalog authorization、boot-manifest injection、preload allowlisting、window security option 和 CSP、固定 IPC registration、listener-free patch boot、归一化的 desktop-local state、target parsing 与 cross-host rejection、每种 Helper 的 entitlement 选择，以及通过 renderer、bridge、runtime request 和 standard-preset session 创建的真实 packaged application。artifact workflow 在每个 target 的原生 GitHub runner 上构建，从 macOS disk image materialize application 或从 Windows ZIP materialize application，再在上传 delivery artifact 前验证并 smoke test 该 application，且不创建 release。

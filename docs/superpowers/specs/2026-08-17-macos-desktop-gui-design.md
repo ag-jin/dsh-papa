@@ -1,4 +1,4 @@
-# macOS Desktop GUI Design
+# DSH Desktop GUI Design
 
 English | [中文](2026-08-17-macos-desktop-gui-design.zh.md)
 
@@ -12,9 +12,9 @@ The browser GUI remains the cross-platform surface. The desktop application must
 
 ## Product Decisions
 
-The first release targets Apple silicon systems running macOS 14 or later, matching the repository's existing macOS runtime distribution. Intel support, mobile clients, Mac App Store distribution, automatic updates, cross-device synchronization, and custom themes are outside this release.
+DSH Desktop ships native `darwin-arm64` and `darwin-x64` builds as ad-hoc signed applications and compressed disk images, plus an unsigned `win32-x64` portable ZIP. Every target builds its native-module closure on a matching runner. Mobile clients, Mac App Store distribution, automatic updates, cross-device synchronization, custom themes, Windows code signing, and Windows installers are outside this release.
 
-DSH Desktop is distributed as an ad-hoc signed application and compressed disk image, without Developer ID signing or notarization. The Mac App Store sandbox is incompatible with the broad local filesystem and shell access that DSH exposes under explicit user-controlled permissions.
+The macOS builds have no Developer ID signature or notarization. The Mac App Store sandbox is incompatible with the broad local filesystem and shell access that DSH exposes under explicit user-controlled permissions. The Windows ZIP requires extraction to a writable local directory and may trigger SmartScreen because it is unsigned.
 
 A workspace is the primary window identity. Sessions belong to a workspace. A developer can open several workspace windows, and the application restores their workspace, selected session, sidebar state, inspector state, and panel widths after relaunch.
 
@@ -102,7 +102,7 @@ Client coverage continues through pnpm run test:gui. It includes desktop connect
 
 Desktop integration tests launch the Electron application against a fixture DSH composition. They create and resume a session, exercise streaming events, run a controlled tool, open the Files and Changes inspector, deliver an approval request, stop a run, simulate a renderer reload, and verify that no LAN socket is opened.
 
-macOS smoke coverage launches the packaged application on Apple silicon, checks application startup, standard keyboard commands, native file selection, window restoration, recovery after a runtime restart, ad-hoc signature integrity, and disk-image integrity.
+Native-runner smoke coverage launches each application materialized from its final delivery artifact, then checks startup, bridge access, embedded session requests, and listener absence. macOS coverage verifies the ad-hoc signatures and mounted disk-image application; Windows coverage verifies the unsigned portable ZIP and its extracted application.
 
 ## Acceptance Criteria
 

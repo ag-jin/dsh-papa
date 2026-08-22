@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-desktop",
-  "description": "Installable macOS Electron client for the listener-free DSH desktop runtime",
+  "description": "Installable native Electron client for the listener-free DSH desktop runtime",
   "version": "0.1.0-rc.8",
   "private": true,
   "productName": "DSH",
@@ -8,9 +8,12 @@
   "main": "lib/electron-runner.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json --pretty false && node ../../node_modules/tsdown/dist/run.mjs --config tsdown.preload.config.ts",
-    "stage:mac": "node scripts/stage-mac.mjs",
-    "package:mac": "node scripts/package-mac.mjs",
-    "make:mac": "node scripts/make-dmg.mjs",
+    "stage": "node scripts/stage-desktop.mjs",
+    "package": "node scripts/package-desktop.mjs",
+    "make:mac": "node scripts/make-macos-dmg.mjs",
+    "make:win": "node scripts/make-windows-zip.mjs",
+    "materialize:delivery": "node scripts/materialize-desktop-delivery.mjs",
+    "verify:artifacts": "node scripts/verify-desktop-artifacts.mjs",
     "start": "electron lib/electron-runner.js",
     "test": "pnpm --dir ../.. exec vitest run apps/desktop/tests",
     "test:e2e": "pnpm --dir ../.. exec vitest run --config vitest.e2e.config.ts apps/desktop/tests/assembled-transport.e2e.ts",
@@ -24,10 +27,10 @@
   ],
   "dependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/cosmokit": "workspace:^",
     "@deepseek-ai/cordis-plugin-hmr": "workspace:^",
     "@deepseek-ai/cordis-plugin-include": "workspace:^",
     "@deepseek-ai/cordis-plugin-timer": "workspace:^",
+    "@deepseek-ai/cosmokit": "workspace:^",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-default-model": "workspace:^",
     "@deepseek-ai/dsh-agent-instructions": "workspace:^",
@@ -163,6 +166,7 @@
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-zip": "^7.11.2",
     "electron": "^43.4.0",
     "playwright": "^1.49.0"
   }

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The Electron macOS launcher hosts the DSH desktop composition for a local developer without starting a DSH TCP or UDP listener.
+The native Electron launcher hosts the DSH desktop composition for a local developer without starting a DSH TCP or UDP listener.
 
 ## Runtime
 
@@ -36,21 +36,21 @@ Run `pnpm --filter @deepseek-ai/dsh-desktop test` for the focused Electron proto
 
 Run `node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/assembled-transport.e2e.ts` after the runtime, renderer, and desktop entries are built to verify the assembled Electron bridge.
 
-Run `node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/packaged-app-smoke.e2e.ts` after `desktop:package:mac` to launch the actual application bundle and verify its packaged renderer, fixed preload bridge, and embedded session request. The smoke test adds a temporary loopback Chromium CDP endpoint only for test attachment; the DSH runtime still opens no listener.
+Run `pnpm run desktop:materialize:delivery` after the native make command, then pass its executable path to `node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/packaged-app-smoke.e2e.ts`. This launches the application materialized from the final DMG or ZIP and verifies its packaged renderer, fixed preload bridge, and embedded session request. The smoke test adds a temporary loopback Chromium CDP endpoint only for test attachment; the DSH runtime still opens no listener.
 
 A runnable packaged window also requires the repository renderer build output under `apps/web/dist`.
 
-## macOS Packaging
+## Native Packaging
 
-Run `pnpm run desktop:package:mac` on an Apple-silicon Mac running macOS 14 or later to create `apps/desktop/out/DSH-darwin-arm64/DSH.app`.
+Each package command accepts `DSH_DESKTOP_PLATFORM` and `DSH_DESKTOP_ARCH`, rejects cross-host targets, and builds the production native-module closure on the matching runner. The supported targets are `darwin-arm64`, `darwin-x64`, and `win32-x64`.
 
-Run `pnpm run desktop:make:mac` to recreate that application and create `apps/desktop/out/DSH-<version>-arm64.dmg`.
+Run `pnpm run desktop:package` to create the application directory for the native host. Run `pnpm run desktop:make:mac` on macOS to create `apps/desktop/out/DSH-<version>-<arch>.dmg`, or run `pnpm run desktop:make:win` on Windows to create `apps/desktop/out/make/zip/win32/x64/DSH-win32-x64-<version>.zip`.
 
-The package uses an ad-hoc Electron signature. It has no Developer ID signature or notarization, so macOS may require Control-clicking the application or disk image and choosing Open on a different Mac.
+The macOS packages contain `DSH.app` and use an ad-hoc Electron signature. They have no Developer ID signature or notarization, so macOS may require Control-clicking the application or disk image and choosing Open on a different Mac. The hardened-runtime signature grants the Electron main process and its Helper app bundles the entitlements needed to load the bundled Electron Framework; the Plugin Helper additionally retains its executable-memory entitlement.
 
-The hardened-runtime signature grants the Electron main process and its Helper app bundles the entitlements needed to load the bundled Electron Framework; the Plugin Helper additionally retains its executable-memory entitlement.
+The Windows package is an unsigned portable ZIP. Extract it to a writable local directory and run `DSH.exe`; Windows may show a SmartScreen warning because this package has no code-signing certificate.
 
-The `Build macOS desktop app` GitHub Actions workflow runs this same command on `macos-14` and retains the application and disk image as an Actions artifact. It does not use Apple credentials or create a GitHub Release.
+The `Build desktop applications` GitHub Actions workflow builds each target on its native runner, materializes the final DMG or ZIP, runs the assembled and packaged Electron tests against that materialized application, verifies the platform artifact, and retains it as an Actions artifact for 14 days. It does not use Apple or Windows signing credentials and does not create a GitHub Release.
 
 ## Model Experience
 

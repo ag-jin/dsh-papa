@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
@@ -9,10 +9,11 @@ import { fileURLToPath } from 'node:url'
 import { chromium, type Browser, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api'
+import { packagedExecutablePath } from '../scripts/desktop-target.mjs'
 
 const APPLICATION_EXECUTABLE = process.env.DSH_DESKTOP_APPLICATION_PATH
-  ?? fileURLToPath(new URL('../out/DSH-darwin-arm64/DSH.app/Contents/MacOS/DSH', import.meta.url))
-const packagedApplicationAvailable = process.platform === 'darwin' && process.arch === 'arm64' && existsSync(APPLICATION_EXECUTABLE)
+  ?? packagedExecutablePath(fileURLToPath(new URL('../out/', import.meta.url)), `${process.platform}-${process.arch}`)
+const packagedApplicationAvailable = existsSync(APPLICATION_EXECUTABLE)
 
 /** Reserves an ephemeral loopback port for the Chromium CDP test attachment. */
 function reserveLoopbackPort(): Promise<number> {
@@ -87,13 +88,19 @@ async function waitForClose(child: ChildProcess, timeout: number): Promise<boole
 
 async function stopApplication(child: ChildProcess | undefined): Promise<void> {
   if (child === undefined || processExitDescription(child) !== undefined) return
+  if (process.platform === 'win32') {
+    // Electron child processes outlive the directly spawned executable on Windows.
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'])
+    await waitForClose(child, 10_000)
+    return
+  }
   child.kill('SIGTERM')
   if (await waitForClose(child, 10_000)) return
   child.kill('SIGKILL')
   await waitForClose(child, 10_000)
 }
 
-describe.skipIf(!packagedApplicationAvailable)('packaged macOS desktop smoke', () => {
+describe.skipIf(!packagedApplicationAvailable)('packaged desktop smoke', () => {
   let browser: Browser | undefined
   let child: ChildProcess | undefined
   let page: Page

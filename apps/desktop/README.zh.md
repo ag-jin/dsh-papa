@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-此 Electron macOS 启动器为本地开发者托管 DSH 桌面组合，并且不启动 DSH TCP 或 UDP 监听器。
+此原生 Electron 启动器为本地开发者托管 DSH 桌面组合，并且不启动 DSH TCP 或 UDP 监听器。
 
 ## 运行时
 
@@ -36,21 +36,21 @@ DSH 仍然拥有 credentials、transcript、session、tool result、setting 和 
 
 在构建 runtime、renderer 和 desktop entry 后，运行 `node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/assembled-transport.e2e.ts`，验证装配后的 Electron bridge。
 
-在 `desktop:package:mac` 后运行 `node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/packaged-app-smoke.e2e.ts`，启动实际的应用包，并验证已打包的 renderer、固定的 preload bridge 与嵌入式 session request。该 smoke test 仅为测试附着临时开启 loopback Chromium CDP endpoint；DSH runtime 仍不监听端口。
+在原生 make command 后运行 `pnpm run desktop:materialize:delivery`，再将其 executable path 传给 `node node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts apps/desktop/tests/packaged-app-smoke.e2e.ts`。这会启动从最终 DMG 或 ZIP materialize 的应用，并验证已打包的 renderer、固定的 preload bridge 与嵌入式 session request。该 smoke test 仅为测试附着临时开启 loopback Chromium CDP endpoint；DSH runtime 仍不监听端口。
 
 可运行的打包窗口还需要仓库中 `apps/web/dist` 下的渲染器 build output。
 
-## macOS 打包
+## 原生打包
 
-在运行 macOS 14 或更高版本的 Apple Silicon Mac 上运行 `pnpm run desktop:package:mac`，生成 `apps/desktop/out/DSH-darwin-arm64/DSH.app`。
+每个 package command 接受 `DSH_DESKTOP_PLATFORM` 和 `DSH_DESKTOP_ARCH`，拒绝 cross-host target，并在对应 runner 上构建 production native-module closure。支持的 target 是 `darwin-arm64`、`darwin-x64` 和 `win32-x64`。
 
-运行 `pnpm run desktop:make:mac` 会重新生成该应用，并创建 `apps/desktop/out/DSH-<version>-arm64.dmg`。
+运行 `pnpm run desktop:package` 会生成本机 target 的 application directory。在 macOS 上运行 `pnpm run desktop:make:mac` 会创建 `apps/desktop/out/DSH-<version>-<arch>.dmg`；在 Windows 上运行 `pnpm run desktop:make:win` 会创建 `apps/desktop/out/make/zip/win32/x64/DSH-win32-x64-<version>.zip`。
 
-该包使用 Electron 的 ad-hoc 签名，没有 Developer ID 签名，也未公证。因此在其他 Mac 上，可能需要按住 Control 点击应用或磁盘映像，然后选择“打开”。
+macOS 包含 `DSH.app` 并使用 Electron 的 ad-hoc 签名，没有 Developer ID 签名，也未公证。因此在其他 Mac 上，可能需要按住 Control 点击应用或磁盘映像，然后选择“打开”。hardened-runtime 签名会向 Electron 主进程及其 Helper app bundle 授予加载内置 Electron Framework 所需的 entitlement；Plugin Helper 还会保留其 executable-memory entitlement。
 
-hardened-runtime 签名会向 Electron 主进程及其 Helper app bundle 授予加载内置 Electron Framework 所需的 entitlement；Plugin Helper 还会保留其 executable-memory entitlement。
+Windows 包是未签名的便携 ZIP。请解压到可写的本地目录后运行 `DSH.exe`；由于该包没有代码签名证书，Windows 可能显示 SmartScreen 警告。
 
-`Build macOS desktop app` GitHub Actions workflow 会在 `macos-14` 上运行同一命令，并将应用和磁盘映像保留为 Actions artifact。它不会使用 Apple 凭据，也不会创建 GitHub Release。
+`Build desktop applications` GitHub Actions workflow 会在每个 target 的原生 runner 上构建，materialize 最终 DMG 或 ZIP，针对该 materialized application 运行 assembled 与 packaged Electron test，验证 platform artifact，并将它作为 14 天的 Actions artifact 保留。它不会使用 Apple 或 Windows 签名凭据，也不会创建 GitHub Release。
 
 ## 模型体验
 
