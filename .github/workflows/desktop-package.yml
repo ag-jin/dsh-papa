@@ -179,7 +179,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}
-          path: apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*
+          # Installers only: the unsigned-artifacts directory also holds the unpacked
+          # application tree and electron-builder's debug file, which are not release assets.
+          path: |
+            apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*.dmg
+            apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*.zip
+            apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*.zip.blockmap
+            apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*.exe
+            apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*.exe.blockmap
           if-no-files-found: error
           retention-days: 14
 
@@ -201,9 +208,14 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
-          ls -l dist-desktop
+          mapfile -t assets < <(find dist-desktop -maxdepth 2 -type f -print | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "::error::no installer artifacts were downloaded"
+            exit 1
+          fi
+          printf '%s\n' "${assets[@]}"
           gh release delete preview --yes --cleanup-tag || true
-          gh release create preview dist-desktop/* \
+          gh release create preview "${assets[@]}" \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Preview $VERSION ($(date -u +%Y-%m-%d))" \
@@ -219,7 +231,12 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
-          ls -l dist-desktop
-          gh release create "$GITHUB_REF_NAME" dist-desktop/* \
+          mapfile -t assets < <(find dist-desktop -maxdepth 2 -type f -print | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "::error::no installer artifacts were downloaded"
+            exit 1
+          fi
+          printf '%s\n' "${assets[@]}"
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
             --title "DeepSeek Harness Desktop $VERSION" \
             --generate-notes
