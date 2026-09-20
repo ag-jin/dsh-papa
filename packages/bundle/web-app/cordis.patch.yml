@@ -98,6 +98,11 @@
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
 
+    # Remote Harness hosts reachable over an SSH tunnel: the durable host list,
+    # each host's SSH password, and the tunnels the sidebar switcher opens.
+    - id: remote-hosts
+      name: '@deepseek-ai/dsh-remote-hosts'
+
     # Session commands, cold reads, and live control over Typert Remote.
     - id: session-controller
       name: '@deepseek-ai/dsh-api-session-controller'

@@ -1027,6 +1027,9 @@ importers:
       '@deepseek-ai/dsh-plugin-manager':
         specifier: workspace:^
         version: link:../../boot/plugin-manager
+      '@deepseek-ai/dsh-remote-hosts':
+        specifier: workspace:^
+        version: link:../../remote/remote-hosts
       '@deepseek-ai/dsh-scope':
         specifier: workspace:^
         version: link:../../core/scope
@@ -2271,6 +2274,9 @@ importers:
       '@deepseek-ai/dsh-office-to-pdf':
         specifier: workspace:^
         version: link:../../document/office-to-pdf
+      '@deepseek-ai/dsh-remote-hosts':
+        specifier: workspace:^
+        version: link:../../remote/remote-hosts
       '@deepseek-ai/dsh-session-log-export':
         specifier: workspace:^
         version: link:../../session-query/session-log-export
@@ -8832,6 +8838,9 @@ importers:
       '@deepseek-ai/dsh-credentials':
         specifier: workspace:^
         version: link:../../credentials/credentials
+      '@deepseek-ai/dsh-ssh-tunnel':
+        specifier: workspace:^
+        version: link:../../ssh/ssh-tunnel
       '@deepseek-ai/dsh-storage-domain':
         specifier: workspace:^
         version: link:../../storage/storage-domain

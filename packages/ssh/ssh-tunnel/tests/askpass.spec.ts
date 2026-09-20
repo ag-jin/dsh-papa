@@ -39,7 +39,10 @@ describe('materializeAskpass', () => {
 
     const { execFile } = await import('node:child_process')
     const { promisify } = await import('node:util')
-    const printed = await promisify(execFile)(handoff.env().SSH_ASKPASS, [], { env: handoff.env() })
+    const environment = handoff.env()
+    const helperPath = environment.SSH_ASKPASS
+    if (helperPath === undefined) throw new Error('askpass spec: the handoff must name a helper')
+    const printed = await promisify(execFile)(helperPath, [], { env: environment })
     expect(printed.stdout.trim()).toBe('hunter2')
     await handoff.dispose()
   })
@@ -48,6 +51,7 @@ describe('materializeAskpass', () => {
     const directory = await workspace()
     const handoff = await materializeAskpass(directory, 'secret')
     const helper = handoff.env().SSH_ASKPASS
+    if (helper === undefined) throw new Error('askpass spec: the handoff must name a helper')
     await handoff.dispose()
 
     await expect(stat(helper)).rejects.toMatchObject({ code: 'ENOENT' })
