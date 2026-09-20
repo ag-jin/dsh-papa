@@ -84,9 +84,9 @@ jobs:
             # macos-latest is Apple Silicon and macos-15-intel is native x64; each macOS target
             # refuses a host that cannot execute its packaged runtime.
             case "$name" in
-              mac-arm64) entry='{"target":"mac-arm64","runner":"macos-latest","shell":"bash","env-file":"apps/desktop/.env.macos","command":"pnpm run package:desktop:mac:arm64"}' ;;
-              mac-x64) entry='{"target":"mac-x64","runner":"macos-15-intel","shell":"bash","env-file":"apps/desktop/.env.macos","command":"pnpm run package:desktop:mac:x64"}' ;;
-              win-x64) entry='{"target":"win-x64","runner":"windows-2025","shell":"pwsh","env-file":"apps/desktop/.env.windows","command":"pnpm run package:desktop:win:x64:unsigned"}' ;;
+              mac-arm64) entry='{"target":"mac-arm64","runner":"macos-latest","env-file":"apps/desktop/.env.macos","command":"pnpm run package:desktop:mac:arm64"}' ;;
+              mac-x64) entry='{"target":"mac-x64","runner":"macos-15-intel","env-file":"apps/desktop/.env.macos","command":"pnpm run package:desktop:mac:x64"}' ;;
+              win-x64) entry='{"target":"win-x64","runner":"windows-2025","env-file":"apps/desktop/.env.windows","command":"pnpm run package:desktop:win:x64:unsigned"}' ;;
               *)
                 echo "::error::Unknown target '$name'. Supported: mac-arm64, mac-x64, win-x64."
                 exit 1
@@ -132,7 +132,13 @@ jobs:
           python-version: '3.10'
 
       - name: Install (immutable)
-        shell: ${{ matrix.shell }}
+        if: runner.os != 'Windows'
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Install (immutable)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: pnpm install --frozen-lockfile
 
       # Electron, Node, Python, and wheel archives are content-addressed by the lock files, so
@@ -160,7 +166,13 @@ jobs:
           Get-Content '${{ matrix.env-file }}'
 
       - name: Package ${{ matrix.target }}
-        shell: ${{ matrix.shell }}
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${{ matrix.command }}
+
+      - name: Package ${{ matrix.target }}
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: ${{ matrix.command }}
 
       - name: Upload ${{ matrix.target }} installers
