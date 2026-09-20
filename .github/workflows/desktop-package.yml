@@ -109,6 +109,12 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # Windows native modules build through node-gyp, which needs a Python interpreter.
+      - uses: actions/setup-python@v6.3.0
+        if: runner.os == 'Windows'
+        with:
+          python-version: '3.10'
+
       - name: Install (immutable)
         shell: ${{ matrix.shell }}
         run: pnpm install --frozen-lockfile
