@@ -15,6 +15,14 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      targets:
+        description: >-
+          Comma-separated targets to build. Any subset of: mac-arm64, mac-x64, win-x64.
+          Empty builds all three.
+        type: string
+        required: false
+        default: ''
 
 concurrency:
   group: desktop-package-${{ github.ref }}
@@ -37,13 +45,17 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       channel: ${{ steps.resolve.outputs.channel }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
-      - name: Resolve the packaged version and release channel
+      - name: Resolve the packaged version, release channel, and targets
         id: resolve
+        env:
+          # Passed through the environment, never interpolated into the script text.
+          REQUESTED_TARGETS: ${{ inputs.targets }}
         run: |
           set -euo pipefail
           version="$(jq -r .version apps/desktop/package.json)"
@@ -62,7 +74,28 @@ jobs:
             echo "channel=preview" >> "$GITHUB_OUTPUT"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Packaging DeepSeek Harness Desktop $version"
+          targets="${REQUESTED_TARGETS:-}"
+          [ -n "${targets// /}" ] || targets='mac-arm64,mac-x64,win-x64'
+          matrix='[]'
+          IFS=',' read -r -a requested <<< "$targets"
+          for raw in "${requested[@]}"; do
+            name="$(echo "$raw" | xargs)"
+            [ -z "$name" ] && continue
+            # macos-latest is Apple Silicon and macos-15-intel is native x64; each macOS target
+            # refuses a host that cannot execute its packaged runtime.
+            case "$name" in
+              mac-arm64) entry='{"target":"mac-arm64","runner":"macos-latest","shell":"bash","env-file":"apps/desktop/.env.macos","command":"pnpm run package:desktop:mac:arm64"}' ;;
+              mac-x64) entry='{"target":"mac-x64","runner":"macos-15-intel","shell":"bash","env-file":"apps/desktop/.env.macos","command":"pnpm run package:desktop:mac:x64"}' ;;
+              win-x64) entry='{"target":"win-x64","runner":"windows-2025","shell":"pwsh","env-file":"apps/desktop/.env.windows","command":"pnpm run package:desktop:win:x64:unsigned"}' ;;
+              *)
+                echo "::error::Unknown target '$name'. Supported: mac-arm64, mac-x64, win-x64."
+                exit 1
+                ;;
+            esac
+            matrix="$(jq -c --argjson entry "$entry" '. + [$entry]' <<< "$matrix")"
+          done
+          echo "Packaging DeepSeek Harness Desktop $version for: $(jq -r '[.[].target] | join(", ")' <<< "$matrix")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
@@ -72,24 +105,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # macos-latest is Apple Silicon and macos-15-intel is native x64; each macOS target
-          # refuses a host that cannot execute its packaged runtime.
-          - target: mac-arm64
-            runner: macos-latest
-            shell: bash
-            env-file: apps/desktop/.env.macos
-            command: pnpm run package:desktop:mac:arm64
-          - target: mac-x64
-            runner: macos-15-intel
-            shell: bash
-            env-file: apps/desktop/.env.macos
-            command: pnpm run package:desktop:mac:x64
-          - target: win-x64
-            runner: windows-2025
-            shell: pwsh
-            env-file: apps/desktop/.env.windows
-            command: pnpm run package:desktop:win:x64:unsigned
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
         with:
