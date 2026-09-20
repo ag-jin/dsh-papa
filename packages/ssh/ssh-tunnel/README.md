@@ -32,3 +32,12 @@ No direct invalidation; opening or closing a tunnel changes no conversation hist
 - Password authentication is the only method; a host permitting only public keys is unreachable until key-based records are added.
 - The implementation spawns system OpenSSH, so it is POSIX-only. Windows needs a pure-JS carrier instead.
 - Tunnels are independent; nothing deduplicates two records naming the same remote endpoint.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+No invariant companion is published. `tunnelArgs` validates its arguments at the parser boundary and the readiness poll observes the master's own control socket; the package owns no other independently observed state relation, and its remote-host consumer owns the connection state.
+</details>

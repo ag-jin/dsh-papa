@@ -11,9 +11,23 @@ const READY_POLL_MS = 250
 /** The child process surface this module uses. */
 export interface TunnelChild {
   readonly pid?: number | undefined
+  /** Set once the process exits; null while it still runs. */
+  readonly exitCode?: number | null | undefined
+  /** Set when a signal ended the process; null while it still runs. */
+  readonly signalCode?: NodeJS.Signals | null | undefined
   kill(signal?: NodeJS.Signals): boolean
   once(event: string, listener: (...args: unknown[]) => void): unknown
   on(event: string, listener: (...args: unknown[]) => void): unknown
+}
+
+/**
+ * Whether a child has already exited. Node assigns `exitCode`/`signalCode`
+ * before emitting `exit`, so a listener attached after the fact never fires.
+ * @param child - the child to probe.
+ * @returns true when the process has already exited.
+ */
+function hasExited(child: TunnelChild): boolean {
+  return child.exitCode != null || child.signalCode != null
 }
 
 /**
@@ -55,6 +69,9 @@ export const systemRunner: TunnelRunner = {
     })
   },
   async terminate(child, timeoutMs) {
+    // A child that already exited emits no further `exit`, so awaiting a fresh
+    // listener here would never settle and would hang every caller of close().
+    if (hasExited(child)) return
     const exited = new Promise<void>((resolve) => { child.once('exit', () => { resolve() }) })
     child.kill('SIGTERM')
     const timer = setTimeout(() => { child.kill('SIGKILL') }, timeoutMs)
