@@ -189,7 +189,7 @@ export class RemoteHostController extends TypertRemoteService {
    * Forget one host, its stored password, and its tunnel.
    * @param id - the host to remove; an unknown id resolves without effect.
    */
-  @Remote('remove')
+  @Remote('delete')
   async remoteExportRemove(id: string): Promise<void> {
     await this.connections.close(id as RemoteHostId)
     await this.registry.remove(id as RemoteHostId)

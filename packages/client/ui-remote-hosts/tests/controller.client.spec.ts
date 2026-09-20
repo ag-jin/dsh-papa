@@ -47,7 +47,7 @@ function bench(overrides: {
     list: overrides.list ?? vi.fn(() => Promise.resolve(ok([BOX]))),
     connect: overrides.connect ?? vi.fn(() => Promise.resolve(ok(CONNECTION))),
     disconnect: overrides.disconnect ?? vi.fn(() => Promise.resolve(ok(undefined))),
-    remove: overrides.remove ?? vi.fn(() => Promise.resolve(ok(undefined))),
+    delete: overrides.remove ?? vi.fn(() => Promise.resolve(ok(undefined))),
     add: overrides.add ?? vi.fn(() => Promise.resolve(ok(BOX))),
   }
   const controller = new RemoteHostsController({ remote: { remoteHosts } } as never)
@@ -128,7 +128,7 @@ describe('RemoteHostsController', () => {
     b.face.connect('box')
     await vi.waitFor(() => { expect(b.state().frameOrigin).not.toBeNull() })
     b.face.remove('other')
-    await vi.waitFor(() => { expect(b.remoteHosts.remove).toHaveBeenCalledWith('other') })
+    await vi.waitFor(() => { expect(b.remoteHosts.delete).toHaveBeenCalledWith('other') })
     expect(b.state().active).toBe('box')
     b.face.remove('box')
     await vi.waitFor(() => { expect(b.state().frameOrigin).toBeNull() })

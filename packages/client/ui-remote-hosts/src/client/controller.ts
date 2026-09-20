@@ -220,7 +220,7 @@ export class RemoteHostsController {
     return this.run(
       id,
       'remove',
-      () => this.ctx.remote.remoteHosts.remove(id),
+      () => this.ctx.remote.remoteHosts.delete(id),
       () => this.getSnapshot().active === id ? { active: null, frameOrigin: null } : null,
     )
   }
