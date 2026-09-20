@@ -1,8 +1,14 @@
 name: Package desktop
 
 # Builds the Desktop application for its three release targets and publishes the installers to
-# this repository's own releases: a `v*` tag publishes a stable release, and a manual dispatch
-# refreshes the rolling `preview` prerelease from the selected ref.
+# this repository's own releases, so the Releases page is the download page. A tag carrying the
+# packaged version publishes stable; a tag carrying `<version>-beta.<N>` publishes that preview;
+# a manual dispatch publishes the next preview.
+#
+# A preview stamps the whole dsh release family to its beta version before packaging, because
+# the packaging chain requires one version across the bundled dsh, the Desktop application, and
+# the private Host. The stamp commits inside the runner; the runner publishes artifacts, never
+# the commit.
 #
 # These are fork builds. `DSH_DESKTOP_FORK=1` makes packaging skip Apple signing and
 # notarization, the Windows signing token, the update feed, and the mandatory-update policy, so
@@ -13,7 +19,8 @@ name: Package desktop
 
 on:
   push:
-    tags: ['v*']
+    # The plan job classifies every tag, so the trigger itself stays unfiltered.
+    tags: ['*']
   workflow_dispatch:
     inputs:
       targets:
@@ -45,6 +52,8 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       channel: ${{ steps.resolve.outputs.channel }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      stamp: ${{ steps.resolve.outputs.stamp }}
       matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - uses: actions/checkout@v6
@@ -56,24 +65,54 @@ jobs:
         env:
           # Passed through the environment, never interpolated into the script text.
           REQUESTED_TARGETS: ${{ inputs.targets }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version="$(jq -r .version apps/desktop/package.json)"
+          base="$(jq -r .version apps/desktop/package.json)"
           root="$(jq -r .version package.json)"
-          if [ "$version" != "$root" ]; then
-            echo "::error::apps/desktop/package.json ($version) and package.json ($root) must carry the same version"
+          if [ "$base" != "$root" ]; then
+            echo "::error::apps/desktop/package.json ($base) and package.json ($root) must carry the same version"
             exit 1
           fi
+          stamp=false
           if [ "$GITHUB_REF_TYPE" = 'tag' ]; then
-            if [ "v${version}" != "$GITHUB_REF_NAME" ]; then
-              echo "::error::tag $GITHUB_REF_NAME must match the packaged version v${version}; run 'pnpm run release:dsh <version>' first, or dispatch a preview instead"
-              exit 1
-            fi
-            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            tag="$GITHUB_REF_NAME"
+            case "$tag" in
+              "$base")
+                channel=stable
+                version="$base"
+                ;;
+              "$base"-beta.*)
+                ordinal="${tag#"$base"-beta.}"
+                # Digits only: the tag reaches this script through the environment and its
+                # suffix becomes a released version.
+                case "$ordinal" in
+                  ''|*[!0-9]*)
+                    echo "::error::preview tag $tag must end in -beta.<number>"
+                    exit 1
+                    ;;
+                esac
+                channel=preview
+                version="$tag"
+                stamp=true
+                ;;
+              *)
+                echo "::error::tag $tag must name either the packaged version $base or a preview $base-beta.<N>; run 'pnpm run release:dsh <version>' before tagging a new version"
+                exit 1
+                ;;
+            esac
           else
-            echo "channel=preview" >> "$GITHUB_OUTPUT"
+            channel=preview
+            highest=0
+            while read -r ref; do
+              [ -n "$ref" ] || continue
+              ordinal="${ref##*.}"
+              case "$ordinal" in ''|*[!0-9]*) continue ;; esac
+              [ "$ordinal" -gt "$highest" ] && highest="$ordinal"
+            done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$base-beta." --jq '.[].ref' 2>/dev/null || true)
+            version="$base-beta.$((highest + 1))"
+            stamp=true
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
           targets="${REQUESTED_TARGETS:-}"
           [ -n "${targets// /}" ] || targets='mac-arm64,mac-x64,win-x64'
           matrix='[]'
@@ -94,7 +133,11 @@ jobs:
             esac
             matrix="$(jq -c --argjson entry "$entry" '. + [$entry]' <<< "$matrix")"
           done
-          echo "Packaging DeepSeek Harness Desktop $version for: $(jq -r '[.[].target] | join(", ")' <<< "$matrix")"
+          echo "Packaging $channel $version for: $(jq -r '[.[].target] | join(", ")' <<< "$matrix")"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$version" >> "$GITHUB_OUTPUT"
+          echo "stamp=$stamp" >> "$GITHUB_OUTPUT"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   build:
@@ -141,12 +184,37 @@ jobs:
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
+      # The packaging chain requires one version across the bundled dsh, the Desktop
+      # application, and the private Host, so a preview stamps the whole family.
+      - name: Stamp the preview version
+        if: needs.plan.outputs.stamp == 'true' && runner.os != 'Windows'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          pnpm run release:dsh "$RELEASE_VERSION"
+          jq -r .version package.json apps/desktop/package.json | sort -u
+
+      - name: Stamp the preview version
+        if: needs.plan.outputs.stamp == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          pnpm run release:dsh $env:RELEASE_VERSION
+          jq -r .version package.json apps/desktop/package.json | Sort-Object -Unique
+
       # Electron, Node, Python, and wheel archives are content-addressed by the lock files, so
       # a restored cache is always the payload this build would download.
       - uses: actions/cache@v4
         with:
           path: apps/desktop/.desktop-build/downloads
-          key: desktop-downloads-${{ matrix.target }}-${{ hashFiles('pnpm-lock.yaml', 'apps/desktop/scripts/primary-runtime-lock.json') }}
+          key: desktop-downloads-${{ matrix.target }}-${{ hashFiles('apps/desktop/scripts/primary-runtime-lock.json') }}
 
       # Release settings come only from this file, never from the job environment.
       - name: Write the fork release settings
@@ -205,6 +273,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
@@ -214,11 +283,11 @@ jobs:
             exit 1
           fi
           printf '%s\n' "${assets[@]}"
-          gh release delete preview --yes --cleanup-tag || true
-          gh release create preview "${assets[@]}" \
+          # Every preview keeps its own beta tag, so an earlier preview stays downloadable.
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "Preview $VERSION ($(date -u +%Y-%m-%d))" \
+            --title "$VERSION ($(date -u +%Y-%m-%d))" \
             --notes "Unsigned preview build of DeepSeek Harness Desktop $VERSION from $GITHUB_SHA.
 
           Installers are unsigned, so macOS requires once: right-click the application and choose Open, or run \`xattr -dr com.apple.quarantine /Applications/DeepSeek\\ Harness.app\`. Windows SmartScreen warns about the unsigned installer."
@@ -228,6 +297,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
@@ -237,6 +307,6 @@ jobs:
             exit 1
           fi
           printf '%s\n' "${assets[@]}"
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
             --title "DeepSeek Harness Desktop $VERSION" \
             --generate-notes
