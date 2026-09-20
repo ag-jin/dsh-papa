@@ -271,15 +271,9 @@ describe('RemoteHostController', () => {
   it('fails loud when host storage is used before the domain opens', async () => {
     const ctx = new Context()
     ctx.provide('credentials', credentialsDouble() as never)
-    // The real registry reaches the lazy domain handle, which is what has not
-    // opened yet; only the tunnel owner is replaced.
-    const controller = RemoteHostController.over(ctx, {
-      connections: connectionsDouble().connections,
-      registry: new RemoteHostRegistry(ctx.credentials, {
-        read: async () => { throw new Error('remote-hosts: the host domain is not open') },
-        write: async () => { throw new Error('remote-hosts: the host domain is not open') },
-      }),
-    })
+    // No override: the constructor wires the real registry over the lazy domain
+    // handle, which is what has not opened yet.
+    const controller = new RemoteHostController(ctx)
 
     await expect(controller.remoteExportAdd(addInput)).rejects.toThrow(/domain is not open/)
   })
