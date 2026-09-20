@@ -30,6 +30,15 @@
 
 The spec says host-key verification uses `StrictHostKeyChecking=yes`. That value dead-ends the first connection to any host, because `yes` refuses an unknown key and the GUI has no terminal to run the interactive fingerprint prompt in. The plan uses **`StrictHostKeyChecking=accept-new` with a DSH-owned `known_hosts`** instead. The security property the spec wanted is preserved: a *new* host is trusted on first sight, and a *changed* key is refused loudly. Task 1 pins both behaviors in tests.
 
+Both halves of that claim were then measured against a real SSH server accepting password authentication, driven by this exact argv shape through `SSH_ASKPASS`:
+
+| Attempt | Result |
+|---|---|
+| Valid password, host never seen before | `AUTH_OK`, and the key is written to the DSH-owned `known_hosts` |
+| Same host and port presenting a different host key | `Host key verification failed.` |
+
+So the first connection needs no terminal, and a substituted host is refused rather than silently trusted.
+
 ---
 
 ## File Structure
