@@ -1,0 +1,191 @@
+name: Package desktop
+
+# Builds the Desktop application for its three release targets and publishes the installers to
+# this repository's own releases: a `v*` tag publishes a stable release, and a manual dispatch
+# refreshes the rolling `preview` prerelease from the selected ref.
+#
+# These are fork builds. `DSH_DESKTOP_FORK=1` makes packaging skip Apple signing and
+# notarization, the Windows signing token, the update feed, and the mandatory-update policy, so
+# the jobs need no signing secrets. An unsigned application updates only by reinstalling:
+# macOS Squirrel refuses unsigned updates, and the build ships no feed. Recipients of a macOS
+# artifact must clear quarantine once (right-click Open, or `xattr -dr com.apple.quarantine`).
+# See apps/desktop/README.md.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-package-${{ github.ref }}
+  # Publication owns a release: a cancelled run could publish a partial asset set.
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+  # Fork-owned application id; the fork switch turns off every official deployment integration
+  # that would otherwise require a release environment.
+  DSH_DESKTOP_APP_ID: com.agjin.dsh
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Resolve the packaged version and release channel
+        id: resolve
+        run: |
+          set -euo pipefail
+          version="$(jq -r .version apps/desktop/package.json)"
+          root="$(jq -r .version package.json)"
+          if [ "$version" != "$root" ]; then
+            echo "::error::apps/desktop/package.json ($version) and package.json ($root) must carry the same version"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = 'tag' ]; then
+            if [ "v${version}" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::tag $GITHUB_REF_NAME must match the packaged version v${version}; run 'pnpm run release:dsh <version>' first, or dispatch a preview instead"
+              exit 1
+            fi
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=preview" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Packaging DeepSeek Harness Desktop $version"
+
+  build:
+    needs: plan
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-latest is Apple Silicon and macos-15-intel is native x64; each macOS target
+          # refuses a host that cannot execute its packaged runtime.
+          - target: mac-arm64
+            runner: macos-latest
+            shell: bash
+            env-file: apps/desktop/.env.macos
+            command: pnpm run package:desktop:mac:arm64
+          - target: mac-x64
+            runner: macos-15-intel
+            shell: bash
+            env-file: apps/desktop/.env.macos
+            command: pnpm run package:desktop:mac:x64
+          - target: win-x64
+            runner: windows-2025
+            shell: pwsh
+            env-file: apps/desktop/.env.windows
+            command: pnpm run package:desktop:win:x64:unsigned
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Enable Windows Developer Mode (symlink support)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (immutable)
+        shell: ${{ matrix.shell }}
+        run: pnpm install --frozen-lockfile
+
+      # Electron, Node, Python, and wheel archives are content-addressed by the lock files, so
+      # a restored cache is always the payload this build would download.
+      - uses: actions/cache@v4
+        with:
+          path: apps/desktop/.desktop-build/downloads
+          key: desktop-downloads-${{ matrix.target }}-${{ hashFiles('pnpm-lock.yaml', 'apps/desktop/scripts/primary-runtime-lock.json') }}
+
+      # Release settings come only from this file, never from the job environment.
+      - name: Write the fork release settings
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'DSH_DESKTOP_APP_ID=%s\nDSH_DESKTOP_FORK=1\n' "$DSH_DESKTOP_APP_ID" > "${{ matrix.env-file }}"
+          cat "${{ matrix.env-file }}"
+
+      - name: Write the fork release settings
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $settings = "DSH_DESKTOP_APP_ID=$env:DSH_DESKTOP_APP_ID`nDSH_DESKTOP_FORK=1`n"
+          Set-Content -Path '${{ matrix.env-file }}' -Value $settings -NoNewline -Encoding utf8
+          Get-Content '${{ matrix.env-file }}'
+
+      - name: Package ${{ matrix.target }}
+        shell: ${{ matrix.shell }}
+        run: ${{ matrix.command }}
+
+      - name: Upload ${{ matrix.target }} installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist-desktop
+          merge-multiple: true
+
+      - name: Publish the preview prerelease
+        if: needs.plan.outputs.channel == 'preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -l dist-desktop
+          gh release delete preview --yes --cleanup-tag || true
+          gh release create preview dist-desktop/* \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Preview $VERSION ($(date -u +%Y-%m-%d))" \
+            --notes "Unsigned preview build of DeepSeek Harness Desktop $VERSION from $GITHUB_SHA.
+
+          Installers are unsigned, so macOS requires once: right-click the application and choose Open, or run \`xattr -dr com.apple.quarantine /Applications/DeepSeek\\ Harness.app\`. Windows SmartScreen warns about the unsigned installer."
+
+      - name: Publish the stable release
+        if: needs.plan.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -l dist-desktop
+          gh release create "$GITHUB_REF_NAME" dist-desktop/* \
+            --title "DeepSeek Harness Desktop $VERSION" \
+            --generate-notes

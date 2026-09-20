@@ -125,6 +125,23 @@ describe('desktop macOS release signature', () => {
       .toThrow(/must be 0 or 1/u)
   })
 
+  it('packages a fork build unsigned, without a mandatory policy or an update feed', async () => {
+    const { createElectronBuilderConfig } = await import('../electron-builder.config.mjs')
+    const config = createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: RELEASE_ENVIRONMENT.DSH_DESKTOP_APP_ID,
+      DSH_DESKTOP_FORK: '1',
+      DSH_DESKTOP_TARGET_PLATFORM: 'darwin',
+      DSH_DESKTOP_TARGET_ARCH: 'arm64',
+    }, 'darwin', 'arm64')
+    expect(config.extraMetadata).not.toHaveProperty('dshMandatoryUpdatePolicy')
+    expect(config).toMatchObject({
+      mac: { forceCodeSigning: false, hardenedRuntime: false, notarize: false },
+      dmg: { sign: false },
+      publish: null,
+    })
+    expect(portablePath(config.directories.output)).toContain('/targets/mac-arm64/unsigned-artifacts')
+  })
+
   it('accepts the configured authority and team', () => {
     const expected = resolveMacOSSigningEnvironment(RELEASE_ENVIRONMENT)
     expect(() => {

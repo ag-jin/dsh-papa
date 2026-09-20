@@ -23,6 +23,7 @@ import {
   resolveDesktopAppId,
   resolveMacOSSigningEnvironment,
 } from './desktop-release-environment.mjs'
+import { isForkDesktopBuild } from './desktop-package-environment.mjs'
 import {
   signMacOSRuntime,
 } from './macos-runtime.ts'
@@ -143,7 +144,9 @@ async function main(): Promise<void> {
     if (!existsSync(join(DSH_OUTPUT_ROOT, 'node_modules', '@deepseek-ai', `libreoffice-kit-${officeEngine}`, 'prebuilds.json'))) {
       throw new Error(`desktop runtime: missing required LibreOffice engine ${officeEngine}`)
     }
-    if (process.platform === 'darwin') {
+    // A fork build signs nothing, so its runtime trees stay unsigned for electron-builder to
+    // package directly rather than requiring a Developer ID identity here.
+    if (process.platform === 'darwin' && !isForkDesktopBuild(process.env)) {
       await signMacOSRuntime(DSH_OUTPUT_ROOT, resolveDesktopAppId(process.env), resolveMacOSSigningEnvironment(process.env))
       await signMacOSRuntime(join(RUNTIME_ROOT, 'primary-runtime'), resolveDesktopAppId(process.env), resolveMacOSSigningEnvironment(process.env))
     }

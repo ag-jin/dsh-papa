@@ -10,7 +10,7 @@ import {
 } from './desktop-auto-update-environment.mjs'
 import { desktopTargetBuildPaths } from './desktop-build-paths.mjs'
 import { packageMacOSArtifacts, type DesktopPrepackagedArtifact } from './package-macos.ts'
-import { loadDesktopPackageEnvironment, validateDesktopPackageEnvironment } from './desktop-package-environment.mjs'
+import { isForkDesktopBuild, loadDesktopPackageEnvironment, validateDesktopPackageEnvironment } from './desktop-package-environment.mjs'
 import { createPackagingRun } from './packaging-run.mjs'
 import { withMacOSSigningKeychain } from './macos-signing-keychain.mjs'
 
@@ -277,9 +277,12 @@ function runPnpm(
 }
 
 async function main(): Promise<void> {
-  const invocation = parseDesktopPackageInvocation(process.argv.slice(2))
-  const { target } = invocation
+  const parsed = parseDesktopPackageInvocation(process.argv.slice(2))
+  const { target } = parsed
   const environment = loadDesktopPackageEnvironment(target.platform)
+  // A fork build signs nothing, so it takes the unsigned path even though the fixed target
+  // commands carry no `--unsigned`; macOS additionally skips the notarization artifact lanes.
+  const invocation = isForkDesktopBuild(environment) ? { ...parsed, unsigned: true } : parsed
   validateDesktopPackageEnvironment(environment, target, invocation)
   if (invocation.check) {
     process.stdout.write(`desktop package: ${target.name} local configuration valid; signing and notarization were not attempted\n`)
@@ -292,7 +295,7 @@ async function main(): Promise<void> {
   if (run !== undefined) console.log(`DESKTOP_PACKAGING_RECORD ${run.directory}`)
   let success = false
   try {
-    if (target.platform === 'darwin') {
+    if (target.platform === 'darwin' && !invocation.unsigned) {
       await withMacOSSigningKeychain(environment, signingEnvironment => packageTarget(invocation, signingEnvironment, run))
     } else {
       await packageTarget(invocation, environment, run)
@@ -363,7 +366,7 @@ export async function packageTarget(
   await execute(['run', 'prepare:packages'], targetEnv)
   await execute(['run', 'prepare:dsh'], targetEnv)
   if (invocation.prepareOnly) return
-  if (target.platform === 'darwin' && !invocation.directory) {
+  if (target.platform === 'darwin' && !invocation.directory && !invocation.unsigned) {
     await execute([
       ...desktopElectronBuilderArguments(target, true),
       '--config.mac.notarize=false',

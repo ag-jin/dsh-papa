@@ -198,6 +198,14 @@ pnpm run package:desktop:win:x64:unsigned
 
 The command requires `DSH_DESKTOP_APP_ID` and the normal build dependencies, including Python and Visual C++ build tools for native modules. Set `PYTHON` to the Python executable when it is absent from `PATH`. It writes the installer to `.desktop-build/targets/win-x64/unsigned-artifacts/`, omits automatic-update configuration, strips signing credentials, and creates no release completion record. It does not require EV credentials or an update origin. The signed packaging and upload commands retain their release requirements.
 
+### Fork builds
+
+Set `DSH_DESKTOP_FORK=1` in the target dotenv file to build the application outside the official deployment. A fork build signs nothing, installs no update feed, and enforces no mandatory-update policy: packaging skips Apple signing, notarization, and stapling, the Windows signing token, and both the policy and updater configuration, so it needs no release credentials. It writes artifacts to `.desktop-build/targets/<target>/unsigned-artifacts/`, and the packaged manifest carries no `dshMandatoryUpdatePolicy`, so the application starts without a policy service. macOS accepts a fork build on both architectures, while `--unsigned` on its own still requires `win-x64`.
+
+An unsigned application cannot update itself: macOS Squirrel requires signed updates and the build ships no feed, so moving versions means replacing the installation. macOS also blocks an unsigned application downloaded from the internet until the user clears quarantine once — right-click the application and choose Open, or run `xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app"`.
+
+[desktop-package.yml](../../.github/workflows/desktop-package.yml) builds all three targets through this switch and publishes them to this repository's own releases.
+
 ### Windows installer interface
 
 The Windows installer uses native NSIS pages with light and dark palettes, system shadows, an editable installation directory, and a finish page whose launch checkbox is selected by default. Installation is restricted to the current user. Clicking Install or pressing Enter validates the current path; new destinations must be empty, and nonempty destinations must be registered installations. Running executables at the affected installation path produce a native prompt and remain running; same-named applications in other directories do not block installation. Silent updates wait up to ten seconds for the affected application to exit, then stop with exit code 2 if it is still running.

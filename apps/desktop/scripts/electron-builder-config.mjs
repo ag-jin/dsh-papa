@@ -17,6 +17,7 @@ import {
 } from './windows-sign.mjs'
 import { resolveDesktopAutoUpdateConfig } from './desktop-auto-update-environment.mjs'
 import { resolveDesktopPolicyEnvironment } from './desktop-policy-environment.mjs'
+import { isForkDesktopBuild } from './desktop-package-environment.mjs'
 import { desktopTargetBuildPaths, resolveDesktopBuildTarget } from './desktop-build-paths.mjs'
 import { installWindowsDirectoryInstaller } from './windows-directory-installer.mjs'
 import { preserveWindowsRuntimeSignature } from './windows-runtime-signature.mjs'
@@ -41,20 +42,23 @@ export function createElectronBuilderConfig(
   preparedRuntime = undefined,
 ) {
   const appId = resolveDesktopAppId(env)
-  const policy = resolveDesktopPolicyEnvironment(env)
+  // A fork build publishes no feed and enforces no update policy, so its packaged manifest
+  // carries no policy at all; the runtime then starts without a mandatory-update service.
+  const fork = isForkDesktopBuild(env)
+  const policy = fork ? undefined : resolveDesktopPolicyEnvironment(env)
   const targetPlatform = env.DSH_DESKTOP_TARGET_PLATFORM
   const resolvedPlatform = targetPlatform ?? hostPlatform
   const resolvedArch = env.DSH_DESKTOP_TARGET_ARCH ?? hostArch
   if (env.DSH_DESKTOP_UNSIGNED !== undefined && !['0', '1'].includes(env.DSH_DESKTOP_UNSIGNED)) {
     throw new Error('desktop package: DSH_DESKTOP_UNSIGNED must be 0 or 1')
   }
-  const unsigned = env.DSH_DESKTOP_UNSIGNED === '1'
-  if (unsigned && resolvedPlatform !== 'win32') throw new Error('desktop package: unsigned builds require Windows')
+  const unsigned = env.DSH_DESKTOP_UNSIGNED === '1' || fork
+  if (unsigned && resolvedPlatform !== 'win32' && !fork) throw new Error('desktop package: unsigned builds require Windows')
   const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
   const packagesWindows = resolvedPlatform === 'win32'
   if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
-  const macOSSigning = packagesMacOS ? resolveMacOSSigningEnvironment(env) : undefined
-  if (packagesMacOS) resolveMacOSNotarizationEnvironment(env)
+  const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
+  if (packagesMacOS && !unsigned) resolveMacOSNotarizationEnvironment(env)
   const buildPaths = desktopTargetBuildPaths(resolveDesktopBuildTarget(env, hostPlatform, hostArch))
   let primaryRuntimeDestination
   const windowsSigner = packagesWindows && !unsigned
@@ -77,7 +81,7 @@ export function createElectronBuilderConfig(
   if (preparedRuntime !== undefined) buildPaths.dsh = preparedRuntime
   return {
     appId,
-    extraMetadata: { dshDesktopAppId: appId, dshMandatoryUpdatePolicy: policy },
+    extraMetadata: { dshDesktopAppId: appId, ...policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy } },
     productName: 'DeepSeek Harness',
     artifactName: 'deepseek-harness-${version}-${os}-${arch}.${ext}',
     directories: { output: unsigned ? join(buildPaths.root, 'unsigned-artifacts') : buildPaths.artifacts },
@@ -122,15 +126,15 @@ export function createElectronBuilderConfig(
       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
       category: 'public.app-category.developer-tools',
       identity: macOSSigning?.signingIdentity,
-      forceCodeSigning: true,
-      hardenedRuntime: true,
+      forceCodeSigning: !unsigned,
+      hardenedRuntime: !unsigned,
       // ASAR-unpacked native runtime files are pre-signed; PAK resources are sealed by their enclosing bundle.
       signIgnore: ['/Contents/Resources/app\\.asar\\.unpacked/dsh(?:/|$)', '/Contents/Resources/runtime/primary-runtime(?:/|$)', '\\.pak$'],
-      notarize: true,
+      notarize: !unsigned,
       target: ['dmg', 'zip'],
     },
     dmg: {
-      sign: true,
+      sign: !unsigned,
       writeUpdateInfo: false,
     },
     beforePack: async context => {
@@ -163,10 +167,11 @@ export function createElectronBuilderConfig(
         await verifyMacOSAppUpdateConfig(appPath, resolveMacOSAppUpdateFeed(context.packager.config.publish),
           context.packager.appInfo.updaterCacheDirName)
       }
+      if (unsigned) return
       verifyMacOSSignatureAfterSign(context, macOSSigning ?? resolveMacOSSigningEnvironment(env))
     },
     artifactBuildCompleted: artifact => {
-      if (!artifact.file.endsWith('.dmg')) return
+      if (unsigned || !artifact.file.endsWith('.dmg')) return
       return notarizeMacOSDiskImageArtifact(
         artifact,
         env,

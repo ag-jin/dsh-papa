@@ -94,6 +94,26 @@ describe('Desktop local packaging configuration', () => {
     }).not.toThrow()
   })
 
+  it('accepts a fork build without official deployment credentials and rejects a malformed fork flag', async () => {
+    expect(() => {
+      validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: RELEASE.DSH_DESKTOP_APP_ID, DSH_DESKTOP_FORK: '1' }, MACOS)
+    }).not.toThrow()
+    expect(() => {
+      validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: RELEASE.DSH_DESKTOP_APP_ID }, MACOS)
+    }).toThrow(/DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN/u)
+    expect(() => {
+      validateDesktopPackageEnvironment(RELEASE, MACOS)
+    }).toThrow(/DSH_DESKTOP_MACOS_SIGNING_IDENTITY/u)
+    await withDirectory(async (directory) => {
+      const env = join(directory, '.env.macos')
+      await writeFile(env, 'DSH_DESKTOP_APP_ID=com.example.mac\nDSH_DESKTOP_FORK=yes\n')
+      expect(() => loadDesktopPackageEnvironment('darwin', {}, directory)).toThrow(/DSH_DESKTOP_FORK must be 0 or 1/u)
+      await writeFile(env, 'DSH_DESKTOP_APP_ID=com.example.mac\nDSH_DESKTOP_FORK=1\n')
+      expect(loadDesktopPackageEnvironment('darwin', { DSH_DESKTOP_FORK: '0' }, directory))
+        .toEqual({ DSH_DESKTOP_APP_ID: 'com.example.mac', DSH_DESKTOP_FORK: '1' })
+    })
+  })
+
   it('rejects incomplete macOS identity and credentials and checks referenced files without contacting Apple', async () => {
     expect(() => {
       validateDesktopPackageEnvironment(RELEASE, MACOS)

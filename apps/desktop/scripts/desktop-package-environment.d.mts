@@ -14,6 +14,13 @@ export function loadDesktopPackageEnvironment(
 ): NodeJS.ProcessEnv
 
 /**
+ * Whether this build ships outside the official deployment.
+ * @param environment File-owned release settings.
+ * @returns True when `DSH_DESKTOP_FORK` is explicitly `1`.
+ */
+export function isForkDesktopBuild(environment: NodeJS.ProcessEnv): boolean
+
+/**
  * Validate release configuration before preparation without invoking a token or Apple's services.
  * @param environment File-owned release settings.
  * @param target Selected release target.
