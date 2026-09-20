@@ -27,6 +27,9 @@
       "path": "../../typert/protocol"
     },
     {
+      "path": "../../ssh/ssh-tunnel"
+    },
+    {
       "path": "../../util/brand"
     }
   ]

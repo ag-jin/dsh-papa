@@ -88,7 +88,7 @@ describe('RemoteHostRegistry storage', () => {
         deleteRecord: vi.fn(async () => undefined),
         modifyRecord: vi.fn(async (_key: unknown, mutate: (c: unknown) => Promise<unknown>) => await mutate(undefined)),
       }
-      return { registry: new RemoteHostRegistry(credentials as never, storage as never), writes, credentials }
+      return { registry: new RemoteHostRegistry(credentials as never, storage), writes, credentials }
     })
   }
 
