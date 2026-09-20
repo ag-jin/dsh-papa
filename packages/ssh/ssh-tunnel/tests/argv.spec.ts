@@ -5,9 +5,16 @@ import { tunnelArgs } from '../src/argv.ts'
 const target = { host: 'box.example', port: 30028, user: 'jin', remotePort: 3080, localPort: 51080 }
 
 describe('tunnelArgs', () => {
-  it('forwards the local port to the remote loopback port', () => {
+  it('binds loopback explicitly, so the tunnel cannot be published by a GatewayPorts setting', () => {
     const args = tunnelArgs(target, '/tmp/dsh-tunnel/master', '/tmp/dsh-tunnel/known_hosts')
-    expect(args[args.indexOf('-L') + 1]).toBe('51080:127.0.0.1:3080')
+    expect(args[args.indexOf('-L') + 1]).toBe('127.0.0.1:51080:127.0.0.1:3080')
+  })
+
+  it('never emits the two-field -L form, whose bind address follows GatewayPorts', () => {
+    const args = tunnelArgs(target, '/tmp/m', '/tmp/kh')
+    const spec = args[args.indexOf('-L') + 1]!
+    expect(spec.split(':')).toHaveLength(4)
+    expect(spec.startsWith('127.0.0.1:')).toBe(true)
   })
 
   it('carries the ssh port and the login target', () => {

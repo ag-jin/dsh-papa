@@ -52,7 +52,7 @@ describe('SshTunnel', () => {
 
     expect(fake.spawns).toHaveLength(1)
     const args = fake.spawns[0]!
-    expect(args[args.indexOf('-L') + 1]).toBe('51080:127.0.0.1:3080')
+    expect(args[args.indexOf('-L') + 1]).toBe('127.0.0.1:51080:127.0.0.1:3080')
     await tunnel.close()
   })
 

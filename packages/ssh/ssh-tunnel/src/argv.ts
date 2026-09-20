@@ -59,7 +59,13 @@ export function tunnelArgs(target: TunnelTarget, controlPath: string, knownHosts
     '-o', 'ExitOnForwardFailure=yes',
     '-o', 'ServerAliveInterval=10',
     '-o', 'ServerAliveCountMax=3',
-    '-L', `${String(target.localPort)}:127.0.0.1:${String(target.remotePort)}`,
+    // The explicit bind address is required, not stylistic. The two-field form
+    // `-L PORT:...` binds whatever the client's GatewayPorts setting selects —
+    // measured at `[::1]` by default and `*` (every interface) under
+    // `GatewayPorts=yes`, which would publish the remote's tool-capable GUI to
+    // the network and stop the SameSite cookie from matching. This form holds
+    // loopback under GatewayPorts=yes too.
+    '-L', `127.0.0.1:${String(target.localPort)}:127.0.0.1:${String(target.remotePort)}`,
     '-p', String(target.port),
     `${target.user}@${target.host}`,
   ]
