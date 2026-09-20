@@ -12,7 +12,7 @@ import { draftOf, EMPTY_FORM, failureText, parsePort, type RemoteHostFormValues,
 const t = ((key: RemoteHostsLocaleKey): string => en[key]) as unknown as Translate
 
 const COMPLETE: RemoteHostFormValues = {
-  label: ' Build box ', host: ' box.example ', user: ' jin ', password: 'secret', port: '22', remotePort: '3080', localPort: '51080',
+  label: ' Build box ', host: ' box.example ', user: ' jin ', password: 'secret', webToken: ' tok ', port: '22', remotePort: '3080', localPort: '51080',
 }
 
 describe('parsePort', () => {
@@ -31,9 +31,9 @@ describe('parsePort', () => {
 })
 
 describe('draftOf', () => {
-  it('trims the identity fields and keeps the password as typed', () => {
+  it('trims the identity fields and keeps the secrets as typed', () => {
     expect(draftOf(COMPLETE)).toEqual({
-      label: 'Build box', host: 'box.example', user: 'jin', port: 22, remotePort: 3080, localPort: 51080, password: 'secret',
+      label: 'Build box', host: 'box.example', user: 'jin', port: 22, remotePort: 3080, localPort: 51080, password: 'secret', webToken: 'tok',
     })
   })
 

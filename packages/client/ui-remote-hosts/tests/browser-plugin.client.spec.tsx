@@ -27,7 +27,10 @@ const BOX: RemoteHostRow = {
   id: 'box', label: 'Build box', host: 'box.example', port: 22, user: 'jin', remotePort: 3080, localPort: 51080, connected: false,
 }
 
-const CONNECTION = { id: 'box', localPort: 51080, origin: 'http://127.0.0.1:51080' }
+const CONNECTION = {
+  id: 'box', localPort: 51080, origin: 'http://127.0.0.1:51080',
+  frameUrl: 'http://127.0.0.1:51080/?token=tok',
+}
 
 function answer<T>(value: T) {
   return { ok: true as const, value }
@@ -100,7 +103,7 @@ describe('ui-remote-hosts browser plugin', () => {
 
     // The framed host is the tunnel origin connect() returned.
     face.connect('box')
-    await vi.waitFor(() => { expect(face.hooks.remoteHosts.getSnapshot().frameOrigin).toBe('http://127.0.0.1:51080') })
+    await vi.waitFor(() => { expect(face.hooks.remoteHosts.getSnapshot().frameOrigin).toBe('http://127.0.0.1:51080/?token=tok') })
 
     // The icon reads no application state and renders at the sidebar's size.
     // Each seat types its own hook, so one rejecting implementation is cast once.

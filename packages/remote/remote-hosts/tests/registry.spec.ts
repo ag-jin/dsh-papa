@@ -110,7 +110,8 @@ describe('RemoteHostRegistry storage', () => {
     await registry.remove(registry.list()[0]!.id)
 
     expect(registry.list()).toHaveLength(0)
-    expect(credentials.deleteRecord).toHaveBeenCalledOnce()
+    // Both secret scopes go with the host: its SSH password and its Web token.
+    expect(credentials.deleteRecord).toHaveBeenCalledTimes(2)
   })
 
   it('stores a replacement password as a versioned grant record', async () => {
@@ -119,6 +120,16 @@ describe('RemoteHostRegistry storage', () => {
 
     expect(credentials.modifyRecord).toHaveBeenCalledOnce()
     expect(credentials.modifyRecord.mock.calls[0]![0]).toBe('remote-host-ssh/box')
+  })
+
+  it('stores the remote Web token under its own scope', async () => {
+    const { registry, credentials } = await registryWith()
+    await registry.setWebToken('box' as never, 'remote-token')
+
+    // A token is a second secret beside the password: separate scope, so
+    // rotating one never disturbs the other.
+    expect(credentials.modifyRecord).toHaveBeenCalledOnce()
+    expect(credentials.modifyRecord.mock.calls[0]![0]).toBe('remote-host-web/box')
   })
 
   it('loads stored hosts in their stored order', async () => {

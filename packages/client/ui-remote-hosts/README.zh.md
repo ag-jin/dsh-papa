@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 摘要
 
-Web 侧边栏的**远端主机**入口列出已配置的远端 Harness 主机，并打开操作它们的面板。连接一台主机会通过 Host（`remoteHosts.connect`）打开它的 SSH 隧道，并把 Host 返回的隧道源加载进框架，于是远端自己的 GUI 就在面板内启动，带着它的 Workspaces 和 Sessions。面板还可以添加主机——名称、SSH 主机、端口、用户、密码，以及远端与本地端口——并把主机连同它存储的密码一起移除。
+Web 侧边栏的**远端主机**入口列出已配置的远端 Harness 主机，并打开操作它们的面板。连接一台主机会通过 Host（`remoteHosts.connect`）打开它的 SSH 隧道，并把 Host 解析出的 URL 加载进框架——当操作者存有令牌时该 URL 携带远端的 Web 访问令牌，因为远端要对根请求认证，而签发的 cookie 绑定在隧道权威上，于是远端自己的 GUI 就在面板内启动，带着它的 Workspaces 和 Sessions。面板还可以添加主机——名称、SSH 主机、端口、用户、密码、可选的远端访问令牌，以及远端与本地端口——并把主机连同它存储的密钥一起移除。
 
 ## 目录
 

@@ -32,6 +32,7 @@ const FIELDS: readonly { readonly key: FieldKey; readonly type: 'text' | 'passwo
   { key: 'password', type: 'password' },
   { key: 'remotePort', type: 'text' },
   { key: 'localPort', type: 'text' },
+  { key: 'webToken', type: 'text' },
 ]
 
 /** The SSH target a row names, as an operator reads it. */
@@ -102,7 +103,7 @@ export function RemoteHostsPanel(props: RemoteHostsPanelProps): ReactNode {
   const { t } = props
   const state = props.useRemoteHosts(snapshot => snapshot)
   const active = state.active
-  const origin = state.frameOrigin
+  const frameUrl = state.frameOrigin
   const [form, setForm] = useState<RemoteHostFormValues>(EMPTY_FORM)
   const [adding, setAdding] = useState(false)
 
@@ -115,7 +116,7 @@ export function RemoteHostsPanel(props: RemoteHostsPanelProps): ReactNode {
     if (draft !== null) props.add(draft)
   }
 
-  if (active !== null && origin !== null) {
+  if (active !== null && frameUrl !== null) {
     const row = state.rows.find(candidate => candidate.id === active)
     return (
       <div className={css.panel} data-remote-hosts-panel="framed">
@@ -132,7 +133,9 @@ export function RemoteHostsPanel(props: RemoteHostsPanelProps): ReactNode {
           </button>
         </div>
         {state.failure === null ? null : <p className={css.error} role="alert">{failureText(state.failure, t)}</p>}
-        <iframe className={css.frame} title={t('frameTitle')} src={`${origin}/`} />
+        {/* The URL carries the remote's launch token when one is stored: the
+            exchange on the tunnel authority mints the cookie the frame needs. */}
+        <iframe className={css.frame} title={t('frameTitle')} src={frameUrl} />
       </div>
     )
   }

@@ -12,10 +12,13 @@ const BOX: RemoteHostRow = {
   id: 'box', label: 'Build box', host: 'box.example', port: 22, user: 'jin', remotePort: 3080, localPort: 51080, connected: false,
 }
 
-const CONNECTION = { id: 'box', localPort: 51080, origin: 'http://127.0.0.1:51080' }
+const CONNECTION = {
+  id: 'box', localPort: 51080, origin: 'http://127.0.0.1:51080',
+  frameUrl: 'http://127.0.0.1:51080/?token=tok',
+}
 
 const DRAFT: RemoteHostDraft = {
-  label: 'Build box', host: 'box.example', port: 22, user: 'jin', remotePort: 3080, localPort: 51080, password: 'secret',
+  label: 'Build box', host: 'box.example', port: 22, user: 'jin', remotePort: 3080, localPort: 51080, password: 'secret', webToken: 'tok',
 }
 
 function ok<T>(value: T) {
@@ -88,7 +91,7 @@ describe('RemoteHostsController', () => {
     b.face.ensure()
     await vi.waitFor(() => { expect(b.state().status).toBe('ready') })
     b.face.connect('box')
-    await vi.waitFor(() => { expect(b.state().frameOrigin).toBe('http://127.0.0.1:51080') })
+    await vi.waitFor(() => { expect(b.state().frameOrigin).toBe('http://127.0.0.1:51080/?token=tok') })
     expect(b.state().active).toBe('box')
     expect(b.state().busy).toEqual([])
     expect(b.remoteHosts.list).toHaveBeenCalledTimes(2)
@@ -173,7 +176,7 @@ describe('RemoteHostsController', () => {
     b.face.connect('box')
     expect(connect).toHaveBeenCalledTimes(1)
     pending.resolve(ok(CONNECTION))
-    await vi.waitFor(() => { expect(b.state().frameOrigin).toBe('http://127.0.0.1:51080') })
+    await vi.waitFor(() => { expect(b.state().frameOrigin).toBe('http://127.0.0.1:51080/?token=tok') })
     expect(b.state().busy).toEqual([])
   })
 
@@ -181,7 +184,7 @@ describe('RemoteHostsController', () => {
     const first = deferred<Answer<typeof CONNECTION>>()
     const connect = vi.fn((id: string) => id === 'box'
       ? first.promise
-      : Promise.resolve(ok({ id, localPort: 51081, origin: 'http://127.0.0.1:51081' })))
+      : Promise.resolve(ok({ id, localPort: 51081, origin: 'http://127.0.0.1:51081', frameUrl: 'http://127.0.0.1:51081/?token=tok' })))
     const b = bench({
       connect,
       list: vi.fn(() => Promise.resolve(ok([BOX, { ...BOX, id: 'rack', label: 'Rack' }]))),
@@ -194,7 +197,7 @@ describe('RemoteHostsController', () => {
     first.resolve(ok(CONNECTION))
     await vi.waitFor(() => { expect(b.state().busy).toEqual([]) })
     expect(b.state().active).toBe('rack')
-    expect(b.state().frameOrigin).toBe('http://127.0.0.1:51081')
+    expect(b.state().frameOrigin).toBe('http://127.0.0.1:51081/?token=tok')
   })
 
   it('publishes nothing for a write disposed while it was on the wire', async () => {

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The **Remote hosts** entry in the Web sidebar lists the configured remote Harness hosts and opens the panel that operates them. Connecting a host opens its SSH tunnel through the Host (`remoteHosts.connect`) and frames the tunnel origin the Host returns, so the remote's own GUI boots inside the panel with its Workspaces and Sessions. The panel also adds a host — label, SSH host, port, user, password, and the remote and local ports — and removes it together with its stored password.
+The **Remote hosts** entry in the Web sidebar lists the configured remote Harness hosts and opens the panel that operates them. Connecting a host opens its SSH tunnel through the Host (`remoteHosts.connect`) and frames the URL the Host resolves, so the remote's own GUI boots inside the panel with its Workspaces and Sessions. That URL carries the remote's Web access token when the operator stored one, because the remote authenticates its root request and the resulting cookie is bound to the tunnel authority. The panel also adds a host — label, SSH host, port, user, password, optional remote access token, and the remote and local ports — and removes it together with its stored secrets.
 
 ## Table of Contents
 
@@ -24,9 +24,9 @@ The **Remote hosts** entry in the Web sidebar lists the configured remote Harnes
 <a id="use-this-package"></a>
 ## Use this package
 
-Select **Remote hosts** in the sidebar. The panel reads the configured hosts through the `remoteHosts` Remote when first rendered, and re-reads after every action, so a host added on another surface appears on the next read. **Connect** opens the host's tunnel and frames the remote GUI; **Disconnect** closes the frame and closes the tunnel with it. Removing a host asks once, because it also forgets the host's stored SSH password. A refused action is said in the panel in one sentence: the host is no longer configured, no SSH password is stored for it, the SSH connection failed, or the local tunnel port is taken.
+Select **Remote hosts** in the sidebar. The panel reads the configured hosts through the `remoteHosts` Remote when first rendered, and re-reads after every action, so a host added on another surface appears on the next read. **Connect** opens the host's tunnel and frames the resolved URL, whose token exchange authenticates the tunnel authority; **Disconnect** closes the frame and closes the tunnel with it. Removing a host asks once, because it also forgets the host's stored SSH password. A refused action is said in the panel in one sentence: the host is no longer configured, no SSH password is stored for it, the SSH connection failed, or the local tunnel port is taken.
 
-**Add host** opens the form: a display name, the SSH host, the SSH port, the SSH user, the SSH password, the remote `dsh web` port the tunnel forwards to, and the local loopback port it binds. **Save** waits until every field is filled and every port is a usable TCP port. The panel mints the durable record's id; the password travels to the Host once, into its credential store, and the panel never shows it again.
+**Add host** opens the form: a display name, the SSH host, the SSH port, the SSH user, the SSH password, the remote `dsh web` port the tunnel forwards to, the local loopback port it binds, and an optional remote access token. **Save** waits until every field is filled and every port is a usable TCP port. The panel mints the durable record's id; the password and any token travel to the Host once, into its credential store, and the panel never shows them again.
 
 The frame loads the origin `connect()` returned — the tunnel authority — and nothing else: the frame's document *is* the remote's origin, so the GUI inside it calls the remote's `/api` and opens its WebSocket as same-origin requests. Pointing fetches anywhere else would cross origins, and the remote's fence rightly refuses that.
 

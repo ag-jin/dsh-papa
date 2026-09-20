@@ -114,6 +114,8 @@ describe('RemoteHostsPanel', () => {
     fireEvent.change(field(en.host), { target: { value: 'box.example' } })
     fireEvent.change(field(en.user), { target: { value: 'jin' } })
     fireEvent.change(field(en.password), { target: { value: 'secret' } })
+    // The remote access token is optional; supplying one rides the frame URL.
+    fireEvent.change(field(en.webToken), { target: { value: 'remote-token' } })
     // The ports open at the fixed layout's suggestion; an unusable one blocks the save.
     fireEvent.change(field(en.localPort), { target: { value: '70000' } })
     expect(screen.getByRole('button', { name: en.save })).toHaveProperty('disabled', true)
@@ -123,7 +125,14 @@ describe('RemoteHostsPanel', () => {
     fireEvent.click(save)
     expect(actions.add).toHaveBeenCalledTimes(1)
     expect(actions.add).toHaveBeenCalledWith({
-      label: 'Build box', host: 'box.example', port: 22, user: 'jin', remotePort: 3080, localPort: 51080, password: 'secret',
+      label: 'Build box',
+      host: 'box.example',
+      port: 22,
+      user: 'jin',
+      remotePort: 3080,
+      localPort: 51080,
+      password: 'secret',
+      webToken: 'remote-token',
     })
   })
 
@@ -158,16 +167,18 @@ describe('RemoteHostsPanel', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('frames the connected host through its tunnel origin and disconnects from the bar', () => {
+  it('frames the connected host at the URL connect resolved, token included', () => {
     const { actions, set } = renderPanel({
       rows: [{ ...BOX, connected: true }],
       active: 'box',
-      frameOrigin: 'http://127.0.0.1:51080',
+      frameOrigin: 'http://127.0.0.1:51080/?token=tok',
     })
     expect(document.querySelector('[data-remote-hosts-panel="framed"]')).toBeTruthy()
     expect(screen.queryByRole('listitem')).toBeNull()
     const frame = document.querySelector('iframe')
-    expect(frame?.getAttribute('src')).toBe('http://127.0.0.1:51080/')
+    // The frame loads exactly the URL the Host resolved, so the remote's
+    // launch-token exchange happens on the tunnel authority.
+    expect(frame?.getAttribute('src')).toBe('http://127.0.0.1:51080/?token=tok')
     expect(frame?.getAttribute('title')).toBe(en.frameTitle)
     expect(screen.getByText('Build box')).toBeTruthy()
     expect(screen.getByText('jin@box.example:22')).toBeTruthy()

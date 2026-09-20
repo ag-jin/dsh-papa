@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-remote-hosts` stores the operator's configured remote Harness hosts. Each host is one validated record (`id`, `label`, `host`, `port`, `user`, `remotePort`, `localPort`) in the `remote_hosts` storage domain, and each host's SSH password is a separate `grant` credential record addressed by the host id, so no durable registry record ever carries a secret. `RemoteHostRegistry` is the read/write surface; the Cordis service and Remote API exposing it arrive with the remote connection package.
+`dsh-remote-hosts` stores the operator's configured remote Harness hosts. Each host is one validated record (`id`, `label`, `host`, `port`, `user`, `remotePort`, `localPort`) in the `remote_hosts` storage domain, and its SSH password and remote Web access token are separate `grant` credential records addressed by the host id, so no durable registry record ever carries a secret. `RemoteHostRegistry` is the read/write surface; the Cordis service and Remote API exposing it arrive with the remote connection package.
 
 ## Model Experience
 
@@ -17,7 +17,7 @@ English | [中文](README.zh.md)
 
 #### What the model sees
 
-Nothing. The package registers no tools, injects no prompts, and appends no session events; it stores the operator's configured hosts behind `ctx.storageDomain` and their passwords behind `ctx.credentials`, and emits only the in-process `domain/changed` event, which reaches a model only if a consumer renders it through its own documented surface.
+Nothing. The package registers no tools, injects no prompts, and appends no session events; it stores the operator's configured hosts behind `ctx.storageDomain` and their secrets behind `ctx.credentials`, and emits only the in-process `domain/changed` event, which reaches a model only if a consumer renders it through its own documented surface.
 
 #### Token effect
 

@@ -26,11 +26,18 @@ const addInput = { ...boxRecord, password: 'hunter2' }
 /** One stored password `grant` record as the credential provider returns it. */
 const grantRecord = (password: string) => ({ kind: 'grant' as const, payload: { version: 1, password } })
 
-/** A credential provider double holding one password record, with spies on both writes. */
-function credentialsDouble(options: { record?: unknown } = {}) {
-  const record = 'record' in options ? options.record : grantRecord('hunter2')
+/**
+ * A credential provider double. The SSH password record and the remote Web
+ * token live under separate scopes, so the double keys its answer by the
+ * requested key rather than returning one record for every scope.
+ */
+function credentialsDouble(options: { record?: unknown; webToken?: string } = {}) {
+  const password = 'record' in options ? options.record : grantRecord('hunter2')
+  const token = 'webToken' in options && options.webToken !== undefined
+    ? { kind: 'grant' as const, payload: { version: 1, token: options.webToken } }
+    : undefined
   return {
-    readRecord: vi.fn(async () => record),
+    readRecord: vi.fn(async (key: string) => (key.includes('remote-host-web') ? token : password)),
     deleteRecord: vi.fn(async () => undefined),
     modifyRecord: vi.fn(async (_key: unknown, mutate: (current: unknown) => Promise<unknown>) => await mutate(undefined)),
   }
@@ -190,8 +197,37 @@ describe('RemoteHostController', () => {
 
     const connection = await controller.remoteExportConnect('box')
 
-    expect(connection).toEqual({ id: 'box', localPort: 51080, origin: 'http://127.0.0.1:51080' })
+    // No Web token is stored, so the frame URL is the bare origin.
+    expect(connection).toEqual({
+      id: 'box', localPort: 51080, origin: 'http://127.0.0.1:51080', frameUrl: 'http://127.0.0.1:51080/',
+    })
     expect(opened).toEqual([boxRecord])
+  })
+
+  it('frames the host with its stored remote Web token in the URL', async () => {
+    const credentials = credentialsDouble({ webToken: 'remote-token' })
+    const controller = await controllerWith({ registry: await registrySeeded([boxRecord], credentials) })
+
+    const connection = await controller.remoteExportConnect('box')
+
+    // The token rides the frame URL so the exchange mints the cookie on the
+    // tunnel authority; the origin stays clean for API-facing callers.
+    expect(connection.origin).toBe('http://127.0.0.1:51080')
+    expect(connection.frameUrl).toBe('http://127.0.0.1:51080/?token=remote-token')
+  })
+
+  it('stores a supplied remote Web token and leaves the frame bare without one', async () => {
+    const withToken = credentialsDouble()
+    const first = await controllerWith({ registry: await registrySeeded([], withToken) })
+    await first.remoteExportAdd({ ...addInput, webToken: 'remote-token' })
+    expect(withToken.modifyRecord.mock.calls.some(call => call[0] === 'remote-host-web/box')).toBe(true)
+
+    // A blank token is not stored, so the frame loads the bare origin and the
+    // remote answers with its own refusal instead of a wrong cookie.
+    const blank = credentialsDouble()
+    const second = await controllerWith({ registry: await registrySeeded([], blank) })
+    await second.remoteExportAdd({ ...addInput, webToken: '' })
+    expect(blank.modifyRecord.mock.calls.some(call => call[0] === 'remote-host-web/box')).toBe(false)
   })
 
   it('adds a host and stores its password without exposing it', async () => {
@@ -216,7 +252,8 @@ describe('RemoteHostController', () => {
     await controller.remoteExportRemove('box')
 
     expect(closed).toEqual([boxRecord.id])
-    expect(credentials.deleteRecord).toHaveBeenCalledOnce()
+    // Both secret scopes go with the host: its SSH password and its Web token.
+    expect(credentials.deleteRecord).toHaveBeenCalledTimes(2)
     expect(await controller.remoteExportList()).toEqual([])
   })
 
@@ -274,7 +311,8 @@ describe('RemoteHostController', () => {
     await controller.remoteExportRemove('box')
 
     expect(table.size).toBe(0)
-    expect(credentials.deleteRecord).toHaveBeenCalledOnce()
+    // Both secret scopes go with the host: its SSH password and its Web token.
+    expect(credentials.deleteRecord).toHaveBeenCalledTimes(2)
     expect(await controller.remoteExportList()).toEqual([])
     await fiber.dispose()
   })

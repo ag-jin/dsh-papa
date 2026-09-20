@@ -30,7 +30,7 @@ export interface RemoteHostsState {
   readonly busy: readonly string[]
   /** The connected host the frame shows; null hides the frame. */
   readonly active: string | null
-  /** The tunnel origin the frame loads; present exactly while `active` is. */
+  /** The URL the frame loads, tunnel origin and remote token included; present exactly while `active` is. */
   readonly frameOrigin: string | null
   readonly failure: RemoteHostsFailure | null
 }
@@ -44,6 +44,8 @@ export interface RemoteHostDraft {
   readonly remotePort: number
   readonly localPort: number
   readonly password: string
+  /** The remote Harness's Web launch token; blank leaves the frame unauthenticated. */
+  readonly webToken: string
 }
 
 /** The registration-side face the panel's slot entry injects. */
@@ -203,7 +205,7 @@ export class RemoteHostsController {
       id,
       'connect',
       () => this.ctx.remote.remoteHosts.connect(id),
-      connection => ({ active: id, frameOrigin: connection.origin }),
+      connection => ({ active: id, frameOrigin: connection.frameUrl }),
     )
   }
 

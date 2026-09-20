@@ -54,6 +54,8 @@ export interface RemoteHostFormValues {
   readonly host: string
   readonly user: string
   readonly password: string
+  /** The remote Harness's Web launch token; blank leaves the frame unauthenticated. */
+  readonly webToken: string
   readonly port: string
   readonly remotePort: string
   readonly localPort: string
@@ -61,7 +63,7 @@ export interface RemoteHostFormValues {
 
 /** The form opens blank, with the ports the plan's fixed layout suggests. */
 export const EMPTY_FORM: RemoteHostFormValues = {
-  label: '', host: '', user: '', password: '', port: '22', remotePort: '3080', localPort: '51080',
+  label: '', host: '', user: '', password: '', webToken: '', port: '22', remotePort: '3080', localPort: '51080',
 }
 
 /**
@@ -92,5 +94,16 @@ export function draftOf(values: RemoteHostFormValues): RemoteHostDraft | null {
   const user = values.user.trim()
   if (label === '' || host === '' || user === '' || values.password === '') return null
   if (port === null || remotePort === null || localPort === null) return null
-  return { label, host, user, port, remotePort, localPort, password: values.password }
+  // The token rides a URL, so a pasted one keeps no surrounding whitespace; the
+  // password stays byte-exact because it authenticates instead of parsing.
+  return {
+    label,
+    host,
+    user,
+    port,
+    remotePort,
+    localPort,
+    password: values.password,
+    webToken: values.webToken.trim(),
+  }
 }

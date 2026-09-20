@@ -76,6 +76,11 @@ export interface RemoteHostAddInput {
   readonly localPort: number
   /** The SSH password stored under the host's credential record. */
   readonly password: string
+  /**
+   * The remote Harness's Web launch token, when the operator has one. Blank or
+   * absent leaves the frame unauthenticated against the remote.
+   */
+  readonly webToken?: string
 }
 
 /** One connection's resolved state, as the frame loader needs it. */
@@ -84,8 +89,15 @@ export interface RemoteHostConnection {
   readonly id: string
   /** The local loopback port the tunnel listens on. */
   readonly localPort: number
-  /** The tunnel origin the remote's frame loads from. */
+  /** The tunnel origin the remote's API is reached through. */
   readonly origin: string
+  /**
+   * The absolute URL the frame loads. The remote's Web server authenticates its
+   * root request with its launch token, so a stored token rides this URL and the
+   * exchange mints the cookie bound to the tunnel authority. Without a token
+   * this is the bare origin and the frame shows the remote's own refusal.
+   */
+  readonly frameUrl: string
 }
 
 /** Host integrations replaceable by direct unit tests. */
@@ -178,10 +190,11 @@ export class RemoteHostController extends TypertRemoteService {
    */
   @Remote('add')
   async remoteExportAdd(input: RemoteHostAddInput): Promise<RemoteHostRow> {
-    const { password, ...rest } = input
+    const { password, webToken, ...rest } = input
     const record = parseRemoteHostRecord(rest)
     await this.registry.add(record)
     await this.registry.setPassword(record.id, password)
+    if (webToken !== undefined && webToken !== '') await this.registry.setWebToken(record.id, webToken)
     return this.rowOf(record, this.connectedIds())
   }
 
@@ -220,7 +233,14 @@ export class RemoteHostController extends TypertRemoteService {
     }
     try {
       const connected = await this.connections.open(record, password)
-      return { id, localPort: connected.localPort, origin: `http://127.0.0.1:${String(connected.localPort)}` }
+      const origin = `http://127.0.0.1:${String(connected.localPort)}`
+      const token = await this.registry.webTokenOf(record.id)
+      return {
+        id,
+        localPort: connected.localPort,
+        origin,
+        frameUrl: token === undefined ? `${origin}/` : `${origin}/?token=${encodeURIComponent(token)}`,
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       if (/address already in use|EADDRINUSE/u.test(message)) {
