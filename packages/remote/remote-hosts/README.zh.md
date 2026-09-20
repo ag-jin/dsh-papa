@@ -13,9 +13,29 @@ kind: "package-reference"
 
 ## Model Experience
 
-本包不新增工具、prompt 或请求上下文内容。它对模型不可见：它配置的是 harness 可以连接哪些主机，而没有任何会话内容取决于注册表的内容。
+### Remote host registry
+
+#### What the model sees
+
+没有。本包不注册工具、不注入 prompt、也不追加会话事件；它把操作者配置的主机存于 `ctx.storageDomain` 之后、把密码存于 `ctx.credentials` 之后，并且只发出进程内的 `domain/changed` 事件——只有当某个消费者通过它自己的文档化界面渲染该事件时，它才会到达模型。
+
+#### Token effect
+
+零：本包没有任何文本进入模型请求。注册表决定的是操作者可以连接哪台远端主机，而从不决定模型被要求做什么。
+
+#### KV Cache effect
+
+无关：注册表的读写从不触及请求前缀，因此这里不会有任何东西使提供方的缓存复用失效。
 
 ## Known Limitations and Deferred Work
 
 - 密码记录是本注册表写入的唯一密钥类型；以密钥认证的主机需要自己的载荷约定，其密钥才能存储于此。
 - 注册表在 `load`、`add` 与 `remove` 之后将状态保存在内存中；另一个进程对同一存储域的写入要到下一次 load 才会被观察到。
+
+### Dev Note
+
+<details>
+<summary>面向维护者的工作上下文 —— 点击展开</summary>
+
+不发布 invariant companion。注册表拥有持久存储与读写界面，但不拥有任何其观察结果可能分歧的独立运行期关系：读取来自经过校验的内存状态，而存储后端已在持久化边界上强制记录 schema。
+</details>
