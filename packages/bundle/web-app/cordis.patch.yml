@@ -263,6 +263,11 @@
     - id: ui-plugin-manager
       name: '@deepseek-ai/dsh-client-ui-plugin-manager'
 
+    # Sidebar switcher for remote Harness hosts reached over an SSH tunnel, and
+    # the panel that frames the connected host's own GUI at the tunnel origin.
+    - id: ui-remote-hosts
+      name: '@deepseek-ai/dsh-client-ui-remote-hosts'
+
     # Read-only Plugin list tab in the Settings Plugins section; the built-in
     # bundles the sidebar page leaves out are inspected here.
     - id: ui-settings-plugin-inventory
