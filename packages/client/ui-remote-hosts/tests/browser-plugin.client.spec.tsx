@@ -103,7 +103,8 @@ describe('ui-remote-hosts browser plugin', () => {
     await vi.waitFor(() => { expect(face.hooks.remoteHosts.getSnapshot().frameOrigin).toBe('http://127.0.0.1:51080') })
 
     // The icon reads no application state and renders at the sidebar's size.
-    const unread = (): number => { throw new Error('The sidebar icon must not read application state') }
+    // Each seat types its own hook, so one rejecting implementation is cast once.
+    const unread = ((): never => { throw new Error('The sidebar icon must not read application state') }) as never
     const glyph = render(<RemoteHostsIcon size={18} active={false}
       usePanelInfo={unread} useSessions={unread} useSessionStatus={unread} useSessionRetainInfo={unread}
       useWorkspaces={unread} useResource={unread} />)

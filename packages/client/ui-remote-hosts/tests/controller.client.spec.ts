@@ -140,7 +140,7 @@ describe('RemoteHostsController', () => {
     await vi.waitFor(() => { expect(b.state().status).toBe('ready') })
     b.face.add(DRAFT)
     await vi.waitFor(() => { expect(b.remoteHosts.add).toHaveBeenCalledTimes(1) })
-    const input = b.remoteHosts.add.mock.calls[0][0] as RemoteHostAddInput
+    const input = b.remoteHosts.add.mock.calls[0]![0] as RemoteHostAddInput
     expect(input.id).toMatch(/^host-[0-9a-f-]+$/u)
     expect(input).toMatchObject({ label: 'Build box', host: 'box.example', user: 'jin', password: 'secret' })
     expect(b.state().failure).toBeNull()

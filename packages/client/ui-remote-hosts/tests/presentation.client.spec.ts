@@ -5,9 +5,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { en, type RemoteHostsLocaleKey } from '../src/client/locales.ts'
-import { draftOf, EMPTY_FORM, failureText, parsePort, type RemoteHostFormValues } from '../src/client/presentation.ts'
+import { draftOf, EMPTY_FORM, failureText, parsePort, type RemoteHostFormValues, type Translate } from '../src/client/presentation.ts'
 
-const t = (key: RemoteHostsLocaleKey): string => en[key]
+// The seat the panel receives also answers the shared common vocabulary, which
+// this dictionary does not carry; the cast keeps the stub to its own keys.
+const t = ((key: RemoteHostsLocaleKey): string => en[key]) as unknown as Translate
 
 const COMPLETE: RemoteHostFormValues = {
   label: ' Build box ', host: ' box.example ', user: ' jin ', password: 'secret', port: '22', remotePort: '3080', localPort: '51080',
