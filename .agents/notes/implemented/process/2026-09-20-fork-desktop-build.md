@@ -16,7 +16,7 @@ Desktop packaging enforces the official deployment: macOS requires a Developer I
 
 The packaged application therefore starts with no policy service, because `resolveDesktopPolicyConfig(undefined)` returns `undefined`, and with no updater, because `publish: null` leaves electron-builder without an `app-update.yml` and the runtime enables updates only when that file exists. Artifacts land in `apps/desktop/.desktop-build/targets/<target>/unsigned-artifacts/`.
 
-[desktop-package.yml](../../../../.github/workflows/desktop-package.yml) builds all three targets through this switch and publishes them to this repository's own releases: a `v*` tag publishes a stable release, and a manual dispatch refreshes the rolling `preview` prerelease. Each job writes the target dotenv file from the workflow environment, so the pipeline needs no signing secret.
+[desktop-package.yml](../../../../.github/workflows/desktop-package.yml) builds all three targets through this switch and publishes them to this repository's own releases, each carrying its installers: a tag naming the packaged version publishes stable, a tag naming `<version>-beta.<N>` publishes that preview, and a manual dispatch publishes the next preview by stamping the whole dsh release family to `<version>-beta.<N>` before packaging. Each job writes the target dotenv file from the workflow environment, so the pipeline needs no signing secret.
 
 ## Alternatives considered
 

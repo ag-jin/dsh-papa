@@ -16,7 +16,7 @@ Status: implemented
 
 因此打包后的应用不带策略服务启动，因为 `resolveDesktopPolicyConfig(undefined)` 返回 `undefined`；也不带更新器，因为 `publish: null` 使 electron-builder 不写 `app-update.yml`，而运行期只在存在该文件时启用更新。产物写入 `apps/desktop/.desktop-build/targets/<target>/unsigned-artifacts/`。
 
-[desktop-package.yml](../../../../.github/workflows/desktop-package.yml) 通过该开关构建全部三个目标，并把它们发布到本仓库自己的 release：`v*` tag 发布稳定版，手动触发刷新滚动的 `preview` 预发布。每个 job 从 workflow 环境写入目标 dotenv 文件，因此流水线不需要任何签名 secret。
+[desktop-package.yml](../../../../.github/workflows/desktop-package.yml) 通过该开关构建全部三个目标，并把它们连同安装包发布到本仓库自己的 release：tag 为打包版本号时发布稳定版，tag 为 `<版本>-beta.<N>` 时发布该预览，手动触发则先把整族 dsh 版本戳成 `<版本>-beta.<N>` 再打包，从而发布下一版预览。每个 job 从 workflow 环境写入目标 dotenv 文件，因此流水线不需要任何签名 secret。
 
 ## 考虑过的替代方案
 
