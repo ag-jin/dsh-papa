@@ -2,6 +2,8 @@
 
 Status: proposed
 
+English | [中文](2026-09-20-remote-host-connection-design.zh.md)
+
 ## Problem
 
 Two client applications serve the DeepSeek Harness GUI: the Electron Desktop application and the browser Web GUI served by `dsh web`. Both drive exactly one Harness Host — the one they were served or launched from. A user who runs Harness on a second machine (a build box, a home server, a lab workstation) cannot reach that machine's Sessions or Workspaces from either client: they must open a browser tab against the remote machine directly, which means exposing the remote Web server to the network.
