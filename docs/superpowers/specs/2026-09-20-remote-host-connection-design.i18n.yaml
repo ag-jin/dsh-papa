@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/superpowers/specs/2026-09-20-remote-host-connection-design.md
-2026-09-20-remote-host-connection-design.md: 9ab5ce3577d3ae76fe380290a4bd524ab66486f1
-2026-09-20-remote-host-connection-design.zh.md: c2fa542cff3539a589f4e7101e34fc18fcc20b13
+2026-09-20-remote-host-connection-design.md: 894020d6076c8d8a442f4873b96eb77f47e2ad0a
+2026-09-20-remote-host-connection-design.zh.md: 9bba42ec8ec93eb22212c89716a1b0465ec763b0

@@ -118,6 +118,35 @@ Why this shape:
 - **It adds no network exposure.** The remote never binds a non-loopback address. This is strictly safer than the `0.0.0.0` alternative, which would publish the tool-capable API to the network over plaintext HTTP with a cookie that omits `Secure`.
 - **It requires no new wire protocol.** The existing Typert Remote/Gateway stack, Session and Workspace APIs, and event forwarding all work unchanged.
 
+### The connection authenticates with an SSH port and credentials, not an ssh config alias
+
+A remote host record carries the SSH endpoint directly: host, port, user, and password. It does not depend on the operator's `~/.ssh/config` or on a pre-installed key, so a host configured only in the application is reachable from the application.
+
+Two carriers can satisfy that, and both were measured end to end against a purpose-built SSH server that genuinely accepts password authentication:
+
+| Carrier | Password auth | Port forward | Full GUI through the tunnel |
+|---|---|---|---|
+| System `ssh` with `SSH_ASKPASS` | Authenticated | Established | 200, 27,660 bytes |
+| `ssh2` (pure-JS library) | Authenticated | Established | 200, 27,660 bytes |
+
+The system `ssh` carrier is chosen, for three reasons.
+
+**Host-key verification.** `ssh2`'s `hostVerifier` defaults to auto-accepting an unknown host key, so using it means writing and owning known-hosts verification ourselves — real security-relevant code. System `ssh` inherits `StrictHostKeyChecking` and known-hosts handling, which is the trust model `packages/ssh/ssh/src/index.ts` already relies on.
+
+**Fit with the repository.** The existing SSH integration spawns system `ssh`; the chosen carrier matches it. `ssh2` is CommonJS, which conflicts with the repository's ESM-only source-launch contract, and its registry metadata carries no `license` field, so adopting it would need a supply-chain review before use.
+
+**Cost of the alternative.** None of this makes the two carriers interchangeable: the pure-JS one is the better answer on Windows, where spawning a POSIX `ssh` with `SSH_ASKPASS` is not portable. Deferring it costs nothing now, because the first phase targets the Web GUI on macOS.
+
+The password reaches system `ssh` through `SSH_ASKPASS`: a helper that prints the stored password, with `SSH_ASKPASS_REQUIRE=force` so it is consulted without a terminal. The forward uses `-N -L <local>:127.0.0.1:<remote> -p <sshPort>`, with `ExitOnForwardFailure=yes` so a failed forward fails the connection instead of leaving a listener that answers nothing.
+
+### The remote host record
+
+Each record carries: a display alias, the SSH host, the SSH port, the SSH user, the remote `dsh web` port, the fixed local tunnel port, and the cached browser cookie.
+
+The SSH password is stored through `ctx.credentials` as a `grant` record, exactly as `packages/client/connection/src/browser-auth.ts` stores the browser-session signing secret. This is what makes unattended reconnect possible: the tunnel owner re-reads the password on each reconnect instead of prompting. The trade-off is explicit — `$DSH_HOME/.credentials.yaml` then holds both the remote browser-session cookie and the SSH password, so it becomes a high-value file and must stay owner-only.
+
+The remote launch token is not a durable record: it is per-process on the remote and changes on every remote restart. The browser cookie is durable, surviving remote restarts on the same authority for its configured lifetime (30 days by default).
+
 ## Components
 
 ### 1. Tunnel owner (new)
@@ -130,9 +159,7 @@ This design therefore adds a small independent tunnel owner that replicates the 
 
 ### 2. Remote host registry (new)
 
-A durable list of configured remote hosts, stored under `$DSH_HOME` (per the user's decision that it travels with the DSH home, not the workspace). Each record carries: a display alias, the OpenSSH host alias, the remote `dsh web` port, the fixed local tunnel port, and the cached browser cookie.
-
-The launch token itself is per-process on the remote and changes on every remote restart; it is not a durable record. What persists is the browser cookie, which survives remote restarts on the same authority for its configured lifetime (30 days by default).
+A durable list of configured remote hosts, stored under `$DSH_HOME` (per the user's decision that it travels with the DSH home, not the workspace). Its record fields and the password's storage are described in the remote host record section above.
 
 ### 3. Host switcher UI (new)
 
@@ -153,7 +180,7 @@ The Desktop shell can reach the tunnel authority through the transport hooks it 
 ## Data flow
 
 1. User selects a remote host in the sidebar.
-2. The registry resolves its record; the tunnel owner ensures the SSH tunnel is up on the record's fixed local port.
+2. The registry resolves its record; the tunnel owner reads the record's password from credentials and establishes the SSH tunnel on the record's fixed local port.
 3. The local page navigates the tunnel origin to the remote's authenticated launch URL once, exchanging the remote's launch token for the authority-bound cookie that the frame will need, and caches that cookie in the record.
 4. The local page points its frame at the tunnel authority. The frame's document is that origin, so the remote GUI boots exactly as it would locally: its own bundle, its own Gateway WebSocket, its own Session and Workspace calls.
 5. The panel shows the remote Workspaces and Sessions, and they are operated exactly like local ones because the remote Host is doing the work.
@@ -165,11 +192,13 @@ Every failure must name an actionable cause; "connection failed" is not acceptab
 
 | Failure | Required report |
 |---|---|
-| SSH authentication refused | Names the host alias and that SSH credentials or the known-host entry must be fixed |
+| SSH authentication refused | Names the host, port, and user, and says the password was rejected |
+| SSH host key unknown or changed | Names the host and states the recorded key no longer matches, so the operator decides whether to re-trust it |
+| SSH port unreachable | Names the host and port and says the connection was refused or timed out |
 | Remote `dsh` not installed or not on `PATH` | Names that the remote has no runnable `dsh` |
 | Remote `dsh web` port occupied by another process | Names the port and that the remote already serves something |
 | Token expired after a remote restart | Offers to re-read the token from the remote and retry |
-| Tunnel dropped mid-session | Reconnects; if the cookie still validates, no user action is required |
+| Tunnel dropped mid-session | Reconnects using the stored password; if the cookie still validates, no user action is required |
 | Local tunnel port already bound | Names the port and the conflicting process |
 | Frame shows the remote's 401 | The tunnel-origin session was never established; re-runs the token exchange |
 
@@ -178,6 +207,8 @@ Every failure must name an actionable cause; "connection failed" is not acceptab
 | Aspect | Property |
 |---|---|
 | Transport | Encrypted by SSH; the remote never binds a non-loopback address |
+| SSH authentication | Password over SSH, carried to system `ssh` through `SSH_ASKPASS`; host-key verification stays on (`StrictHostKeyChecking`), so a substituted host is refused |
+| SSH password at rest | Stored as a `grant` credential record under `$DSH_HOME`, owner-only; it enables unattended reconnect and is the reason that file is a high-value target |
 | Launch token | Travels only inside the SSH channel; captured from remote stdout, never over the network |
 | Credential storage | The cached cookie is written under `$DSH_HOME` with owner-only permissions |
 | Trust | The remote's own `/api` fence and browser authentication are unchanged and fully enforced |
@@ -187,8 +218,8 @@ New exposure introduced by this design: none beyond the SSH access the user alre
 
 ## Testing
 
-- **Unit:** tunnel owner argv construction, readiness detection, and teardown; registry record round-trip and validation; tunnel-port reservation and conflict reporting.
-- **Integration:** a real tunnel in front of a local `dsh web`, proving the token exchange mints an authority-bound cookie and that `/api` calls through the tunnel pass the fence while uncookied calls get 401. This mirrors the measurements recorded above.
+- **Unit:** tunnel owner argv construction, the `SSH_ASKPASS` handoff, readiness detection, and teardown; registry record round-trip, credential-record storage, and validation; tunnel-port reservation and conflict reporting.
+- **Integration:** a real SSH server accepting password authentication, with a real tunnel in front of a local `dsh web`, proving password authentication succeeds, the token exchange mints an authority-bound cookie, and `/api` calls through the tunnel pass the fence while uncookied calls get 401. This mirrors the measurements recorded above.
 - **Embedding:** a local page embedding the tunnel origin, proving the frame boots the remote GUI and issues its own remote API calls, and that the tunnel-origin session is required for the frame to render. This is the behaviour measured in Edge and recorded above.
 - **End-to-end:** two Harness instances (local plus one reached through the tunnel), proving the switcher renders the remote's Workspaces and Sessions and that a prompt sent to a remote Session executes on the remote.
 - **Snapshot:** the host switcher is a product-user-visible change, so a keyless recorded-session snapshot is required by the repository's testing policy.
@@ -203,7 +234,8 @@ New exposure introduced by this design: none beyond the SSH access the user alre
 ## Open risks
 
 - **Fixed local port.** The cookie is bound to the tunnel authority, so the local port cannot change between runs without forcing a new token exchange. The registry must reserve a stable port per host and report a clear conflict when it is taken.
+- **Password authentication only accepts a password.** The chosen carrier disables public-key authentication so a record's password is the single credential. A host that permits only keys is unreachable until the design adds key-based records.
+- **The password path is POSIX-specific.** `SSH_ASKPASS` and a spawned `ssh` are how macOS and Linux authenticate; Windows has neither in this shape. The `ssh2` carrier is the answer there and is deferred, not rejected.
 - **Remote `PATH` under a non-interactive SSH command.** A detached remote `dsh web` is started from a non-login shell, which may not carry the user's `PATH`. The probe must resolve `dsh` explicitly and fail with a clear message when it cannot.
-- **Non-interactive SSH authentication.** The tunnel uses batch mode, so an interactive passphrase prompt cannot appear. Hosts requiring one must be pre-authenticated through an agent or a key without a passphrase.
-- **Framing is same-site only.** The embedding measurement holds because the local page and the tunnel share the `127.0.0.1` site. A local page served from a different site, or a tunnel exposed on a non-loopback address, would lose the `SameSite=Strict` cookie and the frame would render the remote's 401. Binding the tunnel to loopback is therefore a correctness requirement, not only a security preference.
+- **Frame protocol is same-site only.** The embedding measurement holds because the local page and the tunnel share the `127.0.0.1` site. A local page served from a different site, or a tunnel exposed on a non-loopback address, would lose the `SameSite=Strict` cookie and the frame would render the remote's 401. Binding the tunnel to loopback is therefore a correctness requirement, not only a security preference.
 - **The remote's frame policy is not ours to guarantee.** The remote index currently sends no `X-Frame-Options` or `frame-ancestors`, which is what makes embedding possible. A future remote version could add them, so the end-to-end test must assert the frame actually renders rather than assume it.
