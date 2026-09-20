@@ -87,7 +87,7 @@ async function controllerWith(overrides: {
   registry?: RemoteHostRegistry
   connections?: RemoteHostConnections
 } = {}): Promise<RemoteHostController> {
-  return new RemoteHostController(new Context(), {
+  return RemoteHostController.over(new Context(), {
     registry: overrides.registry ?? await registrySeeded([boxRecord]),
     connections: overrides.connections ?? connectionsDouble().connections,
   })
@@ -271,7 +271,15 @@ describe('RemoteHostController', () => {
   it('fails loud when host storage is used before the domain opens', async () => {
     const ctx = new Context()
     ctx.provide('credentials', credentialsDouble() as never)
-    const controller = new RemoteHostController(ctx, { connections: connectionsDouble().connections })
+    // The real registry reaches the lazy domain handle, which is what has not
+    // opened yet; only the tunnel owner is replaced.
+    const controller = RemoteHostController.over(ctx, {
+      connections: connectionsDouble().connections,
+      registry: new RemoteHostRegistry(ctx.credentials, {
+        read: async () => { throw new Error('remote-hosts: the host domain is not open') },
+        write: async () => { throw new Error('remote-hosts: the host domain is not open') },
+      }),
+    })
 
     await expect(controller.remoteExportAdd(addInput)).rejects.toThrow(/domain is not open/)
   })

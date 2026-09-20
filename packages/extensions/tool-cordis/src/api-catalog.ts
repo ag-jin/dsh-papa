@@ -1618,6 +1618,41 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'remoteHosts',
+    summary: 'Host service backing the generated `ctx.remote.remoteHosts` namespace.',
+    description: 'Host service backing the generated `ctx.remote.remoteHosts` namespace.',
+    methods: [
+      {
+        signature: '@Remote(\'list\') remoteExportList(): Promise<RemoteHostRow[]>',
+        description: 'Every configured host and whether its tunnel is live.',
+        parameters: [],
+        returns: 'the rows the host switcher renders.',
+      },
+      {
+        signature: '@Remote(\'add\') async remoteExportAdd(input: RemoteHostAddInput): Promise<RemoteHostRow>',
+        description: 'Add or replace one host and store its SSH password.',
+        parameters: [{ name: 'input', description: 'the host fields plus its password.' }],
+        returns: 'the stored host\'s row.',
+      },
+      {
+        signature: '@Remote(\'delete\') async remoteExportRemove(id: string): Promise<void>',
+        description: 'Forget one host, its stored password, and its tunnel.',
+        parameters: [{ name: 'id', description: 'the host to remove; an unknown id resolves without effect.' }],
+      },
+      {
+        signature: '@Remote(\'connect\') async remoteExportConnect(id: string): Promise<RemoteHostConnection>',
+        description: 'Open the host\'s tunnel so its GUI can load. Opening an already-connected host returns the live connection.',
+        parameters: [{ name: 'id', description: 'the host to connect.' }],
+        returns: 'the loopback origin the frame loads from.',
+      },
+      {
+        signature: '@Remote(\'disconnect\') async remoteExportDisconnect(id: string): Promise<void>',
+        description: 'Close one host\'s tunnel. The remote process keeps running.',
+        parameters: [{ name: 'id', description: 'the host to disconnect; an unconnected id resolves without effect.' }],
+      },
+    ],
+  },
+  {
     key: 'sandbox',
     summary: 'Abstract process-sandbox service.',
     description: 'Abstract process-sandbox service. confine must return enforcing argv or fail closed at wrap or runner-execution time; silent unconfined passthrough is forbidden. Functional probes arbitrate multi-runner chains and may be skipped for a sole candidate, whose own refusal remains the fail-closed end.',
@@ -5515,6 +5550,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RemoteEventHostInfo',
     declaration: 'export interface RemoteEventHostInfo {\n    readonly home: string;\n}',
+  },
+  {
+    name: 'RemoteHostAddInput',
+    declaration: 'export interface RemoteHostAddInput {\n    readonly id: string;\n    readonly label: string;\n    readonly host: string;\n    readonly port: number;\n    readonly user: string;\n    readonly remotePort: number;\n    readonly localPort: number;\n    readonly password: string;\n    readonly webToken?: string;\n}',
+  },
+  {
+    name: 'RemoteHostConnection',
+    declaration: 'export interface RemoteHostConnection {\n    readonly id: string;\n    readonly localPort: number;\n    readonly origin: string;\n    readonly frameUrl: string;\n}',
+  },
+  {
+    name: 'RemoteHostRow',
+    declaration: 'export interface RemoteHostRow {\n    readonly id: string;\n    readonly label: string;\n    readonly host: string;\n    readonly port: number;\n    readonly user: string;\n    readonly remotePort: number;\n    readonly localPort: number;\n    readonly connected: boolean;\n}',
   },
   {
     name: 'RenderedDocumentBytes',

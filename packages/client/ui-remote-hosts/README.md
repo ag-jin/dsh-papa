@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The **Remote hosts** entry in the Web sidebar lists the configured remote Harness hosts and opens the panel that operates them. Connecting a host opens its SSH tunnel through the Host (`remoteHosts.connect`) and frames the URL the Host resolves, so the remote's own GUI boots inside the panel with its Workspaces and Sessions. That URL carries the remote's Web access token when the operator stored one, because the remote authenticates its root request and the resulting cookie is bound to the tunnel authority. The panel also adds a host — label, SSH host, port, user, password, optional remote access token, and the remote and local ports — and removes it together with its stored secrets.
+The **Remote hosts** entry in the Web sidebar lists the configured remote Harness hosts and opens the panel that operates them. Connecting a host opens its SSH tunnel through the Host and frames the URL the Host resolves, so the remote's own GUI boots inside the panel with its Workspaces and Sessions; that URL carries the remote's Web access token when the operator stored one, because the remote authenticates its root request. The panel adds a host and removes it together with its stored secrets.
 
 ## Table of Contents
 
@@ -18,6 +18,7 @@ The **Remote hosts** entry in the Web sidebar lists the configured remote Harnes
 - [Further Exploration](#further-exploration)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
 
 -----
 
@@ -85,3 +86,13 @@ These limits define the reach of the switcher; they are current package constrai
 - **One frame at a time** — the panel frames the host of the last connect; connecting another host points the frame elsewhere and leaves the earlier tunnel open until that host is disconnected.
 
 **Runtime invariant:** No companion is published. This package owns a sidebar panel over Host-owned facts.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>

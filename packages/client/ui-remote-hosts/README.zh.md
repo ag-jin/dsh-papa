@@ -7,9 +7,9 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
-Web 侧边栏的**远端主机**入口列出已配置的远端 Harness 主机，并打开操作它们的面板。连接一台主机会通过 Host（`remoteHosts.connect`）打开它的 SSH 隧道，并把 Host 解析出的 URL 加载进框架——当操作者存有令牌时该 URL 携带远端的 Web 访问令牌，因为远端要对根请求认证，而签发的 cookie 绑定在隧道权威上，于是远端自己的 GUI 就在面板内启动，带着它的 Workspaces 和 Sessions。面板还可以添加主机——名称、SSH 主机、端口、用户、密码、可选的远端访问令牌，以及远端与本地端口——并把主机连同它存储的密钥一起移除。
+Web 侧边栏的**远端主机**入口列出已配置的远端 Harness 主机，并打开操作它们的面板。连接一台主机会通过 Host 打开它的 SSH 隧道，并加载 Host 解析出的 URL，于是远端自己的 GUI 就在面板内启动，带着它的 Workspaces 和 Sessions；当操作者存有令牌时该 URL 携带远端的 Web 访问令牌，因为远端要对根请求认证。面板可以添加主机，并把主机连同它存储的密钥一起移除。
 
 ## 目录
 
@@ -18,6 +18,7 @@ Web 侧边栏的**远端主机**入口列出已配置的远端 Harness 主机，
 - [延伸阅读](#further-exploration)
 - [模型体验](#model-experience)
 - [已知限制与未竟事项](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
 
 -----
 
@@ -76,6 +77,7 @@ Web 侧边栏的**远端主机**入口列出已配置的远端 Harness 主机，
 
 无关：面板读取 Remote 应答并发布自己的快照存储，因此这里不会触及请求前缀或提供方的缓存复用。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与未竟事项
 
 这些限制划定切换器的边界；它们是当前的包约束。
@@ -85,3 +87,13 @@ Web 侧边栏的**远端主机**入口列出已配置的远端 Harness 主机，
 - **一次只有一个框架**——面板框住最后一次连接的主机；连接另一台主机会把框架指向别处，而先前的隧道会保持打开，直到那台主机被断开。
 
 **运行时不变量：** 不发布伴随包。本包拥有一个侧边栏面板，内容全部来自 Host 持有的事实。
+
+<a id="dev-note"></a>
+### 开发备注
+
+<details>
+<summary>维护者工作上下文——点击展开</summary>
+
+无。
+
+</details>

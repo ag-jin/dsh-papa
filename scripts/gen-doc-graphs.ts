@@ -286,6 +286,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns Workspace commands and reconnect-safe Workspace state delivery through the generated Remote namespace.',
   },
   {
+    key: 'remoteHosts',
+    pkg: 'remote-hosts',
+    title: 'Host remote-Harness connection controller',
+    mode: 'core',
+    note: 'Owns the configured remote hosts, their SSH passwords and Web access tokens in the credential store, and one loopback tunnel per host through the generated Remote namespace.',
+  },
+  {
     key: 'directoryPickerController',
     pkg: 'api-workspace-controller',
     title: 'Host directory-picking Remote controller',

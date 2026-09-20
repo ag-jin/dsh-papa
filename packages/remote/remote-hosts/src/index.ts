@@ -100,34 +100,44 @@ export interface RemoteHostConnection {
   readonly frameUrl: string
 }
 
-/** Host integrations replaceable by direct unit tests. */
-export interface RemoteHostOverrides {
-  /** Replace the tunnel owner so a spec need not spawn `ssh`. */
-  readonly connections?: RemoteHostConnections
-  /** Replace host storage and password reads. */
-  readonly registry?: RemoteHostRegistry
-}
-
 /** Host service backing the generated `ctx.remote.remoteHosts` namespace. */
 export class RemoteHostController extends TypertRemoteService {
   static inject = ['credentials', 'storageDomain']
 
-  private readonly registry: RemoteHostRegistry
-  private readonly connections: RemoteHostConnections
+  private registry: RemoteHostRegistry
+  private connections: RemoteHostConnections
   private storage: RemoteHostStorage | undefined
 
   /**
    * @param ctx - Host context carrying the credential store and the storage domain.
-   * @param overrides - test seams; production passes none.
    */
-  constructor(ctx: Context, overrides: RemoteHostOverrides = {}) {
+  constructor(ctx: Context) {
     super(ctx, 'remoteHosts', { namespace: 'remoteHosts' })
-    this.connections = overrides.connections ?? new RemoteHostConnections()
-    this.registry = overrides.registry ?? new RemoteHostRegistry(ctx.credentials, {
+    this.connections = new RemoteHostConnections()
+    this.registry = new RemoteHostRegistry(ctx.credentials, {
       read: async () => await this.storageHandle().read(),
       write: async (records) => { await this.storageHandle().write(records) },
     })
     ctx.effect(() => () => this.connections.closeAll(), 'remote-hosts:closeTunnels')
+  }
+
+  /**
+   * A controller over replaced collaborators, for direct unit tests. The Loader
+   * constructs through the constructor above, so this stays a test seam rather
+   * than a deployment option: a `cordis.yml` cannot name it, and the
+   * constructor keeps its second parameter free for a `Config`.
+   * @param ctx - Host context, usually a bare `Context`.
+   * @param overrides - the tunnel owner and registry to use instead of the real ones.
+   * @returns a controller that spawns no `ssh` and reads no durable store.
+   */
+  static over(ctx: Context, overrides: {
+    connections: RemoteHostConnections
+    registry: RemoteHostRegistry
+  }): RemoteHostController {
+    const controller = new RemoteHostController(ctx)
+    controller.connections = overrides.connections
+    controller.registry = overrides.registry
+    return controller
   }
 
   /** Open the durable domain and load the stored host list; host reads and writes fail until this ran. */

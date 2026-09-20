@@ -68,7 +68,10 @@ export class RemoteHostRegistry {
     private readonly storage: RemoteHostStorage,
   ) {}
 
-  /** The configured hosts, in display order. */
+  /**
+   * The configured hosts, in display order.
+   * @returns the loaded records, in stored order.
+   */
   list(): readonly RemoteHostRecord[] { return this.records }
 
   /**

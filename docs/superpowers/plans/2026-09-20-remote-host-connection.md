@@ -1570,7 +1570,7 @@ git commit -m "feat(remote-hosts): serve the remote host API over Typert Remote"
 - Create: `packages/client/ui-remote-hosts/src/client/RemoteHostsPanel.tsx`
 - Create: `packages/client/ui-remote-hosts/src/client/RemoteHostsPanel.module.css`
 - Create: `packages/client/ui-remote-hosts/src/client/RemoteHostsIcon.tsx`
-- Create: `packages/client/ui-remote-hosts/tests/apply.client.spec.ts`
+- Create: `packages/client/ui-remote-hosts/tests/browser-plugin.client.spec.tsx`
 - Modify: `tsconfig.client.json` (add the reference)
 - Modify: `packages/bundle/web-app/cordis.patch.yml` (add the `dsh.client` row)
 - Modify: `packages/bundle/web-app/package.json` (add the dependency)
@@ -1648,7 +1648,7 @@ export {}
 
 - [ ] **Step 2: Write the failing test**
 
-`packages/client/ui-remote-hosts/tests/apply.client.spec.ts`:
+`packages/client/ui-remote-hosts/tests/browser-plugin.client.spec.tsx`:
 
 ```ts
 // @vitest-environment jsdom
@@ -1695,7 +1695,7 @@ describe('remote host switcher', () => {
 
 - [ ] **Step 3: Run the test to verify it fails**
 
-Run: `npx vitest run packages/client/ui-remote-hosts/tests/apply.client.spec.ts`
+Run: `npx vitest run packages/client/ui-remote-hosts/tests/browser-plugin.client.spec.tsx`
 
 Expected: FAIL — cannot resolve `../src/client/index.ts`.
 
@@ -1896,7 +1896,7 @@ export function RemoteHostsPanel(props: RemoteHostsPanelProps): ReactNode {
 
 - [ ] **Step 6: Run the test to verify it passes**
 
-Run: `npx vitest run packages/client/ui-remote-hosts/tests/apply.client.spec.ts`
+Run: `npx vitest run packages/client/ui-remote-hosts/tests/browser-plugin.client.spec.tsx`
 
 Expected: PASS — 2 tests.
 

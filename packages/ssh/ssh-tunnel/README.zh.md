@@ -11,6 +11,14 @@ kind: "package-reference"
 
 `dsh-ssh-tunnel` 建立一条多路复用的 OpenSSH 连接，把一个固定的本地回环端口转发到远端 `dsh web` 端口。它使用密码认证，密码经 `SSH_ASKPASS` 提供给 `ssh`，因此机密永远不会进入 argv；它还对照 DSH 自有的 `known_hosts` 文件校验主机密钥，因此新主机只在首次连接时被信任，密钥变更会被大声拒绝。隧道只绑定回环地址。
 
+## 目录
+
+- [模型体验](#model-experience)
+- [已知限制与延后工作](#known-limitations-and-deferred-work)
+
+-----
+
+<a id="model-experience"></a>
 ## 模型体验
 
 ### 隧道流量
@@ -27,6 +35,7 @@ kind: "package-reference"
 
 无直接失效；开启或关闭隧道不改变任何会话历史。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与延后工作
 
 - 密码认证是唯一方式；在加入基于密钥的记录之前，只允许公钥的主机无法连接。

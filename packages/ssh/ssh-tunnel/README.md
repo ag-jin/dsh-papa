@@ -11,6 +11,13 @@ English | [中文](README.zh.md)
 
 `dsh-ssh-tunnel` opens one multiplexed OpenSSH connection and forwards a fixed local loopback port to a remote `dsh web` port. It authenticates by password, supplied to `ssh` through `SSH_ASKPASS` so the secret never reaches argv, and it verifies host keys against a DSH-owned `known_hosts` file, so a new host is trusted once and a changed key is refused. The tunnel binds loopback only.
 
+## Table of Contents
+
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+
+-----
+
 ## Model Experience
 
 ### Tunnel traffic

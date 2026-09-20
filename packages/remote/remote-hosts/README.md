@@ -11,6 +11,13 @@ English | [中文](README.zh.md)
 
 `dsh-remote-hosts` stores the operator's configured remote Harness hosts. Each host is one validated record (`id`, `label`, `host`, `port`, `user`, `remotePort`, `localPort`) in the `remote_hosts` storage domain, and its SSH password and remote Web access token are separate `grant` credential records addressed by the host id, so no durable registry record ever carries a secret. `RemoteHostRegistry` is the read/write surface; the Cordis service and Remote API exposing it arrive with the remote connection package.
 
+## Table of Contents
+
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+
+-----
+
 ## Model Experience
 
 ### Remote host registry

@@ -41,7 +41,10 @@ export class RemoteHostConnections {
    */
   constructor(private readonly options: Partial<SshTunnelOptions> = {}) {}
 
-  /** The connected hosts and their local loopback ports. */
+  /**
+   * The connected hosts and their local loopback ports.
+   * @returns one entry per live tunnel, in open order.
+   */
   list(): readonly ConnectedHost[] {
     return [...this.live.entries()].map(([id, connection]) => ({ id, localPort: connection.tunnel.localPort }))
   }
