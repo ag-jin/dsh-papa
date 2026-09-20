@@ -39,6 +39,19 @@ Both halves of that claim were then measured against a real SSH server accepting
 
 So the first connection needs no terminal, and a substituted host is refused rather than silently trusted.
 
+## The forward binds loopback explicitly, and that is load-bearing
+
+The obvious `-L <localPort>:127.0.0.1:<remotePort>` form does **not** fix the local bind address: without a leading address, OpenSSH binds whatever the client's `GatewayPorts` setting selects. Measured against the same real server:
+
+| Forward spec | Resulting local listener |
+|---|---|
+| `-L 51080:127.0.0.1:3080` | `[::1]:51080` |
+| `-L 51080:127.0.0.1:3080` with `-o GatewayPorts=yes` | `*:51080` — **every interface** |
+| `-L 127.0.0.1:51080:127.0.0.1:3080` | `127.0.0.1:51080` |
+| `-L 127.0.0.1:51080:127.0.0.1:3080` with `-o GatewayPorts=yes` | `127.0.0.1:51080` |
+
+The middle row is the hazard: an operator whose `ssh_config` sets `GatewayPorts yes` would publish the remote's tool-capable GUI to the network, and the design's `SameSite=Strict` cookie would stop matching — so the tunnel would be both exposed and broken. The four-field form holds under `GatewayPorts=yes`, so Task 1 emits it and a unit test asserts the spec has four fields beginning `127.0.0.1:`.
+
 ---
 
 ## File Structure
@@ -148,9 +161,16 @@ import { tunnelArgs } from '../src/argv.ts'
 const target = { host: 'box.example', port: 30028, user: 'jin', remotePort: 3080, localPort: 51080 }
 
 describe('tunnelArgs', () => {
-  it('forwards the local port to the remote loopback port', () => {
+  it('binds loopback explicitly, so the tunnel cannot be published by a GatewayPorts setting', () => {
     const args = tunnelArgs(target, '/tmp/dsh-tunnel/master', '/tmp/dsh-tunnel/known_hosts')
-    expect(args[args.indexOf('-L') + 1]).toBe('51080:127.0.0.1:3080')
+    expect(args[args.indexOf('-L') + 1]).toBe('127.0.0.1:51080:127.0.0.1:3080')
+  })
+
+  it('never emits the two-field -L form, whose bind address follows GatewayPorts', () => {
+    const args = tunnelArgs(target, '/tmp/m', '/tmp/kh')
+    const spec = args[args.indexOf('-L') + 1]!
+    expect(spec.split(':')).toHaveLength(4)
+    expect(spec.startsWith('127.0.0.1:')).toBe(true)
   })
 
   it('carries the ssh port and the login target', () => {
@@ -270,7 +290,12 @@ export function tunnelArgs(target: TunnelTarget, controlPath: string, knownHosts
     '-o', 'ExitOnForwardFailure=yes',
     '-o', 'ServerAliveInterval=10',
     '-o', 'ServerAliveCountMax=3',
-    '-L', `${String(target.localPort)}:127.0.0.1:${String(target.remotePort)}`,
+    // An explicit bind address is required, not stylistic. Measured: the
+    // two-field form `-L PORT:...` binds whatever the client's GatewayPorts
+    // selects — `[::1]` by default, and `*` when the operator's ssh_config sets
+    // `GatewayPorts yes`, which would publish the remote's tool-capable GUI to
+    // the network. Binding 127.0.0.1 explicitly holds under GatewayPorts=yes too.
+    '-L', `127.0.0.1:${String(target.localPort)}:127.0.0.1:${String(target.remotePort)}`,
     '-p', String(target.port),
     `${target.user}@${target.host}`,
   ]
@@ -281,7 +306,7 @@ export function tunnelArgs(target: TunnelTarget, controlPath: string, knownHosts
 
 Run: `npx vitest run packages/ssh/ssh-tunnel/tests/argv.spec.ts`
 
-Expected: PASS — 9 tests.
+Expected: PASS — 10 tests.
 
 - [ ] **Step 7: Write the package README**
 
@@ -549,7 +574,7 @@ describe('SshTunnel', () => {
 
     expect(fake.spawns).toHaveLength(1)
     const args = fake.spawns[0]!
-    expect(args[args.indexOf('-L') + 1]).toBe('51080:127.0.0.1:3080')
+    expect(args[args.indexOf('-L') + 1]).toBe('127.0.0.1:51080:127.0.0.1:3080')
     await tunnel.close()
   })
 
