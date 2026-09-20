@@ -44,4 +44,90 @@ describe('RemoteHostRegistry.passwordOf', () => {
     await expect(registry.passwordOf('box' as never)).resolves.toBe('hunter2')
     expect(readRecord).toHaveBeenCalledOnce()
   })
+
+  it('reports a missing password rather than returning an empty one', async () => {
+    const { RemoteHostRegistry } = await import('../src/registry.ts')
+    const credentials = { readRecord: async () => undefined }
+    const storage = { read: async () => [], write: async () => undefined }
+    const registry = new RemoteHostRegistry(credentials as never, storage)
+
+    await expect(registry.passwordOf('box' as never)).rejects.toThrow(/no ssh password/)
+  })
+
+  it('refuses a stored record of the wrong kind instead of reading it as absent', async () => {
+    const { RemoteHostRegistry } = await import('../src/registry.ts')
+    const credentials = { readRecord: async () => ({ kind: 'apiKey', payload: { key: 'x' } }) }
+    const storage = { read: async () => [], write: async () => undefined }
+    const registry = new RemoteHostRegistry(credentials as never, storage)
+
+    await expect(registry.passwordOf('box' as never)).rejects.toThrow(/unsupported format/)
+  })
+
+  it('refuses a stored record whose payload this version does not know', async () => {
+    const { RemoteHostRegistry } = await import('../src/registry.ts')
+    const credentials = {
+      readRecord: async () => ({ kind: 'grant', payload: { version: 99, password: 'stale' } }),
+    }
+    const storage = { read: async () => [], write: async () => undefined }
+    const registry = new RemoteHostRegistry(credentials as never, storage)
+
+    await expect(registry.passwordOf('box' as never)).rejects.toThrow(/invalid payload/)
+  })
+})
+
+describe('RemoteHostRegistry storage', () => {
+  function registryWith(overrides: { read?: () => Promise<unknown[]>; write?: (r: unknown) => Promise<void> } = {}) {
+    return import('../src/registry.ts').then(({ RemoteHostRegistry }) => {
+      const writes: unknown[][] = []
+      const storage = {
+        read: overrides.read ?? (async () => []),
+        write: overrides.write ?? (async (records: unknown) => { writes.push(records as unknown[]) }),
+      }
+      const credentials = {
+        readRecord: async () => undefined,
+        deleteRecord: vi.fn(async () => undefined),
+        modifyRecord: vi.fn(async (_key: unknown, mutate: (c: unknown) => Promise<unknown>) => await mutate(undefined)),
+      }
+      return { registry: new RemoteHostRegistry(credentials as never, storage as never), writes, credentials }
+    })
+  }
+
+  it('adds a host and replaces an existing record with the same id', async () => {
+    const { registry, writes } = await registryWith()
+    const record = parseRemoteHostRecord(valid)
+    await registry.add(record)
+    expect(registry.list()).toHaveLength(1)
+
+    await registry.add(parseRemoteHostRecord({ ...valid, label: 'Renamed' }))
+    expect(registry.list()).toHaveLength(1)
+    expect(registry.list()[0]!.label).toBe('Renamed')
+    expect(writes).toHaveLength(2)
+  })
+
+  it('removes a host together with its password record', async () => {
+    const { registry, credentials } = await registryWith()
+    await registry.add(parseRemoteHostRecord(valid))
+    await registry.remove(registry.list()[0]!.id)
+
+    expect(registry.list()).toHaveLength(0)
+    expect(credentials.deleteRecord).toHaveBeenCalledOnce()
+  })
+
+  it('stores a replacement password as a versioned grant record', async () => {
+    const { registry, credentials } = await registryWith()
+    await registry.setPassword('box' as never, 'replacement')
+
+    expect(credentials.modifyRecord).toHaveBeenCalledOnce()
+    expect(credentials.modifyRecord.mock.calls[0]![0]).toBe('remote-host-ssh/box')
+  })
+
+  it('loads stored hosts in their stored order', async () => {
+    const { registry } = await registryWith({
+      read: async () => [{ ...valid, id: 'one' }, { ...valid, id: 'two' }],
+    })
+    const loaded = await registry.load()
+
+    expect(loaded.map(record => record.id)).toEqual(['one', 'two'])
+    expect(registry.list()).toHaveLength(2)
+  })
 })

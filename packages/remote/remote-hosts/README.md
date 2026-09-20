@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-remote-hosts
 
+English | [中文](README.zh.md)
+
 ## Summary
 
 `dsh-remote-hosts` stores the operator's configured remote Harness hosts. Each host is one validated record (`id`, `label`, `host`, `port`, `user`, `remotePort`, `localPort`) in the `remote_hosts` storage domain, and each host's SSH password is a separate `grant` credential record addressed by the host id, so no durable registry record ever carries a secret. `RemoteHostRegistry` is the read/write surface; the Cordis service and Remote API exposing it arrive with the remote connection package.
