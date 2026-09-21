@@ -1,388 +1,625 @@
 /**
- * The reverse proxy's two forwarding paths, each against a real local upstream:
- * the HTTP path preserves the authority the remote's fence reads, and the
- * upgrade path replays the handshake so the remote's WebSocket mux answers.
+ * The relay's two forwarding paths against fake local upstreams: the HTTP path
+ * serves the remote on an origin the relay owns, and the upgrade path replays
+ * the handshake so the remote's WebSocket mux answers and streams both ways.
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
-import { createServer } from 'node:http'
-import { connect as netConnect } from 'node:net'
-import type { IncomingMessage, Server, ServerResponse } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { once } from 'node:events'
+import { createHmac, createHash } from 'node:crypto'
+import { createServer, request as httpRequest } from 'node:http'
+import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeaders, Server as HttpServer, ServerResponse } from 'node:http'
+import { connect as netConnect, createServer as createRawServer } from 'node:net'
+import type { AddressInfo, Server as NetServer, Socket as NetSocket } from 'node:net'
 import type { Duplex } from 'node:stream'
-import { RemoteRelay } from '../src/relay.ts'
+import { afterEach, describe, expect, it } from 'vitest'
+import { forwardedHeaders, REMOTE_STREAM_MUX_PATH, RemoteRelay } from '../src/relay.ts'
 
-/** One upstream that records what the relay sent it and answers predictably. */
-interface Upstream {
-  readonly port: number
-  /** The headers of the last HTTP request the relay forwarded. */
-  lastHeaders: IncomingMessage['headers'] | undefined
-  /** The raw upgrade request line and headers the relay replayed. */
-  lastUpgrade: string | undefined
-  close(): Promise<void>
-}
+/** Deliberately not a real listener: only a rewrite can put it into an upstream Host. */
+const AUTHORITY = 'gui.example:8443'
 
-/** Start an upstream that echoes, so a test can assert both directions. */
-async function startUpstream(): Promise<Upstream> {
-  const state: { lastHeaders?: IncomingMessage['headers']; lastUpgrade?: string } = {}
-  const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    state.lastHeaders = req.headers
-    const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => { chunks.push(chunk) })
-    req.on('end', () => {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ url: req.url, body: Buffer.concat(chunks).toString('utf8') }))
-    })
-  })
-  // A WebSocket upgrade is answered by echoing the request back to the caller,
-  // which is enough to prove the handshake survived the relay verbatim.
-  server.on('upgrade', (req: IncomingMessage, socket: Duplex) => {
-    state.lastUpgrade = [
-      `${req.method} ${req.url}`,
-      `host=${String(req.headers.host)}`,
-      `origin=${String(req.headers.origin)}`,
-      `key=${String(req.headers['sec-websocket-key'])}`,
-      `set-cookie=${(req.headers['set-cookie'] ?? []).join(', ')}`,
-    ].join(' ')
-    socket.write('HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\n')
-    socket.end()
-  })
-  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
-  const { port } = server.address() as AddressInfo
-  return {
-    port,
-    get lastHeaders() { return state.lastHeaders },
-    get lastUpgrade() { return state.lastUpgrade },
-    async close() {
-      // An upgraded socket outlives `close()`; drop it so teardown settles.
-      server.closeAllConnections()
-      await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
-    },
-  }
-}
+/** The secret every relay under test signs with. */
+const SECRET = Buffer.from('a'.repeat(43), 'base64url')
 
-/** One relay front end bound to an ephemeral loopback port. */
-interface Front {
-  readonly port: number
-  readonly authority: string
-  close(): Promise<void>
-}
+const closers: Array<() => Promise<void>> = []
+const open: Duplex[] = []
 
-/**
- * Start a front end that hands every request and upgrade to the relay.
- * @param relay - the proxy under test.
- * @returns the front end and the authority it is reached by.
- */
-async function startFront(relay: RemoteRelay): Promise<Front> {
-  const server = createServer((req, res) => { relay.handle(req, res) })
-  server.on('upgrade', (req, socket, head) => { relay.handleUpgrade(req, socket, head) })
-  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
-  const { port } = server.address() as AddressInfo
-  return {
-    port,
-    authority: `127.0.0.1:${String(port)}`,
-    async close() {
-      server.closeAllConnections()
-      await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
-    },
-  }
-}
-
-const open: Array<() => Promise<void>> = []
 afterEach(async () => {
-  for (const close of open.reverse()) await close()
-  open.length = 0
+  for (const socket of open.splice(0)) socket.destroy()
+  for (const close of closers.splice(0).reverse()) await close()
 })
 
-/**
- * Build one relay in front of one upstream.
- * @returns both endpoints, both registered for teardown.
- */
-async function startPair(): Promise<{ upstream: Upstream; front: Front }> {
-  const upstream = await startUpstream()
-  open.push(() => upstream.close())
-  const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: upstream.port }, authority: '' })
-  const front = await startFront(relay)
-  open.push(() => front.close())
-  return { upstream, front }
+/** Listen on an OS-assigned loopback port and register the close for teardown. */
+async function listen(server: HttpServer | NetServer): Promise<number> {
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+  closers.push(() => new Promise<void>((resolve) => {
+    if ('closeAllConnections' in server) server.closeAllConnections()
+    server.close(() => {
+      resolve()
+    })
+  }))
+  return (server.address() as AddressInfo).port
 }
 
-/**
- * Build a relay that presents a caller-chosen authority upstream.
- * @param authority - the authority the relay must present.
- * @returns the pair, registered for teardown.
- */
-async function startPairWithAuthority(authority: string): Promise<{ upstream: Upstream; front: Front }> {
-  const upstream = await startUpstream()
-  open.push(() => upstream.close())
-  const front = await startFront(new RemoteRelay({ upstream: { host: '127.0.0.1', port: upstream.port }, authority }))
-  open.push(() => front.close())
-  return { upstream, front }
+/** Wait for a probe to produce a value, failing the test instead of hanging the suite. */
+async function until<T>(probe: () => T | undefined): Promise<T> {
+  const deadline = Date.now() + 2_000
+  for (;;) {
+    const value = probe()
+    if (value !== undefined) return value
+    if (Date.now() > deadline) throw new Error('relay spec: condition not reached')
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
 }
+
+/** What the fake remote recorded about one relayed exchange. */
+interface SeenExchange {
+  method: string | undefined
+  url: string | undefined
+  headers: IncomingHttpHeaders
+  body: string
+}
+
+/** A fake remote dsh: a bootable index, a body echo, and a route that dies after a partial body. */
+async function startRemoteHttp(): Promise<{ port: number; seen: SeenExchange[] }> {
+  const seen: SeenExchange[] = []
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => {
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString() })
+      if (req.url === '/' || req.url?.startsWith('/?') === true) {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        res.end('<!doctype html><html data-boot="true"><body>remote-gui</body></html>')
+        return
+      }
+      if (req.url === '/echo') {
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        res.end(Buffer.concat(chunks).toString())
+        return
+      }
+      if (req.url !== '/partial') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"ok":true}')
+        return
+      }
+      // Head plus a partial body, then the socket dies: the relayed response
+      // must tear down instead of hanging or ending as if complete.
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-length': '64' })
+      res.write('partial')
+      setImmediate(() => {
+        res.socket?.destroy()
+      })
+    })
+  })
+  return { port: await listen(server), seen }
+}
+
+/** A raw TCP stand-in for the remote stream mux: records the replayed handshake, answers 101, then echoes every byte. */
+async function startRemoteMux(): Promise<{
+  port: number
+  /** The request line and headers the relay replayed, one entry per upgrade. */
+  handshakes: string[]
+  /** Bytes the relay passed through after each handshake. */
+  extra: string[]
+  closeUpstreams(): void
+  closedCount(): number
+}> {
+  const handshakes: string[] = []
+  const extra: string[] = []
+  const sockets = new Set<NetSocket>()
+  let closed = 0
+  const server = createRawServer((socket) => {
+    sockets.add(socket)
+    socket.on('close', () => {
+      closed += 1
+      sockets.delete(socket)
+    })
+    let buffered = ''
+    let upgraded = false
+    socket.on('data', (chunk: Buffer) => {
+      if (upgraded) {
+        extra.push(chunk.toString())
+        socket.write(chunk)
+        return
+      }
+      buffered += chunk.toString()
+      const end = buffered.indexOf('\r\n\r\n')
+      if (end === -1) return
+      handshakes.push(buffered.slice(0, end))
+      upgraded = true
+      socket.write('HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\nUPSTREAM-READY')
+      const rest = buffered.slice(end + 4)
+      if (rest.length > 0) {
+        extra.push(rest)
+        socket.write(rest)
+      }
+    })
+  })
+  const port = await listen(server)
+  closers.push(async () => {
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve()
+      })
+    })
+  })
+  return {
+    port,
+    handshakes,
+    extra,
+    closeUpstreams: () => {
+      for (const socket of sockets) socket.end()
+    },
+    closedCount: () => closed,
+  }
+}
+
+/** Reserve one loopback port, releasing it immediately so a relay can bind it. */
+async function freePort(): Promise<number> {
+  const probe = createRawServer(() => {})
+  const port = await listen(probe)
+  await new Promise<void>((resolve) => { probe.close(() => { resolve() }) })
+  closers.splice(closers.length - 1, 1)
+  return port
+}
+
+/** Start one relay in front of the given upstream port, registering its teardown. */
+async function startRelay(upstreamPort: number, secret: Buffer | undefined): Promise<RemoteRelay> {
+  const relay = new RemoteRelay({
+    upstream: { host: '127.0.0.1', port: upstreamPort },
+    secret,
+    port: await freePort(),
+  })
+  await relay.start()
+  closers.push(() => relay.close())
+  return relay
+}
+
+/** One relayed exchange as the browser sees it. */
+interface RelayAnswer {
+  status: number
+  headers: IncomingHttpHeaders
+  body: string
+}
+
+/** Issue one request through a relay origin. */
+function relayRequest(
+  origin: string,
+  options: { path: string; method?: string; body?: string; headers?: OutgoingHttpHeaders },
+): Promise<RelayAnswer> {
+  const url = new URL(origin)
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { host: url.hostname, port: url.port, path: options.path, method: options.method, headers: options.headers },
+      (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (chunk: Buffer) => {
+          chunks.push(chunk)
+        })
+        res.on('end', () => {
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString() })
+        })
+      },
+    )
+    req.on('error', reject)
+    if (options.body !== undefined) req.write(options.body)
+    req.end()
+  })
+}
+
+/** Issue one request and report a torn response as its own outcome, not as a rejection. */
+function tornRequest(origin: string, path: string): Promise<{ kind: string; body: string }> {
+  const url = new URL(origin)
+  return new Promise((resolve) => {
+    let body = ''
+    const req = httpRequest({ host: url.hostname, port: url.port, path }, (res) => {
+      res.on('data', (chunk: Buffer) => {
+        body += chunk.toString()
+      })
+      // A remote dying mid-body truncates the relayed response: node reports
+      // `aborted` because the status line already arrived.
+      res.on('aborted', () => { resolve({ kind: 'ABORTED', body }) })
+      res.on('end', () => { resolve({ kind: 'END', body }) })
+      res.on('error', () => { resolve({ kind: 'ERROR', body }) })
+    })
+    req.on('error', () => { resolve({ kind: 'REQ_ERROR', body }) })
+    req.end()
+  })
+}
+
+/** Open one browser-style upgrade through a relay origin, collecting everything the socket delivers. */
+function relayUpgrade(origin: string, path: string): Promise<{ status: number; socket: Duplex; received: () => string }> {
+  const url = new URL(origin)
+  return new Promise((resolve, reject) => {
+    let text = ''
+    const req = httpRequest({
+      host: url.hostname,
+      port: url.port,
+      path,
+      headers: {
+        connection: 'Upgrade',
+        upgrade: 'websocket',
+        'sec-websocket-version': '13',
+        'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        origin,
+      },
+    })
+    req.on('upgrade', (res, socket, head) => {
+      text = head.toString()
+      socket.on('data', (chunk: Buffer) => {
+        text += chunk.toString()
+      })
+      open.push(socket)
+      resolve({ status: res.statusCode ?? 0, socket, received: () => text })
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+describe('forwardedHeaders', () => {
+  it('presents the relay authority and replaces the browser cookie with the minted one', () => {
+    const forwarded = forwardedHeaders(
+      { host: '127.0.0.1:19387', cookie: 'dsh-auth-local=own' },
+      AUTHORITY,
+      'dsh-auth-remote=minted',
+    )
+
+    expect(forwarded.host).toBe(AUTHORITY)
+    expect(forwarded.cookie).toBe('dsh-auth-remote=minted')
+    // A browser sends every cookie it holds for a host regardless of port, so
+    // the local Host's own session cookie must not reach another machine.
+    expect(JSON.stringify(forwarded)).not.toContain('dsh-auth-local')
+  })
+
+  it('omits the cookie entirely when no secret was readable', () => {
+    const forwarded = forwardedHeaders({ cookie: 'dsh-auth-local=own' }, AUTHORITY, undefined)
+
+    expect(forwarded.cookie).toBeUndefined()
+    expect(forwarded.host).toBe(AUTHORITY)
+  })
+
+  it('drops this hop\'s framing headers and values that are absent', () => {
+    const forwarded = forwardedHeaders(
+      { connection: 'keep-alive', te: 'trailers', 'x-kept': 'yes', 'x-empty': undefined },
+      AUTHORITY,
+      undefined,
+    )
+
+    expect(forwarded.connection).toBeUndefined()
+    expect(forwarded.te).toBeUndefined()
+    expect(forwarded['x-empty']).toBeUndefined()
+    expect(forwarded['x-kept']).toBe('yes')
+  })
+})
+
+describe('RemoteRelay lifecycle', () => {
+  it('binds the configured loopback port and reports it', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
+
+    expect(relay.origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u)
+    expect(relay.authority).toBe(new URL(relay.origin).host)
+  })
+
+  it('reports no authority before it is started', () => {
+    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: 1 }, secret: SECRET })
+
+    expect(() => relay.authority).toThrow(/not started/u)
+  })
+
+  it('refuses a second start rather than binding a second origin', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
+
+    await expect(relay.start()).rejects.toThrow(/already started/u)
+  })
+
+  it('releases its origin on close, and closing twice agrees', async () => {
+    const remote = await startRemoteHttp()
+    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: remote.port }, secret: SECRET })
+    const origin = await relay.start()
+
+    await relay.close()
+    await relay.close()
+
+    expect(() => relay.authority).toThrow(/not started/u)
+    // The origin is genuinely released, not merely forgotten.
+    await expect(new Promise((resolve, reject) => {
+      const req = httpRequest(`${origin}/`, () => { resolve('answered') })
+      req.on('error', () => { reject(new Error('refused')) })
+      req.end()
+    })).rejects.toThrow(/refused/u)
+  })
+
+  it('rejects a start whose port is already bound, so the caller reports it taken', async () => {
+    const blocker = createRawServer(() => {})
+    const port = await listen(blocker)
+    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: 1 }, secret: SECRET, port })
+
+    // A second bind on the same port fails: the error must reach the caller
+    // rather than leaving a half-started relay behind.
+    await expect(relay.start()).rejects.toThrow(/EADDRINUSE/u)
+    expect(() => relay.authority).toThrow(/not started/u)
+  })
+
+  it('closes cleanly when it was never started', async () => {
+    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: 1 }, secret: SECRET })
+
+    await expect(relay.close()).resolves.toBeUndefined()
+  })
+})
 
 describe('RemoteRelay HTTP forwarding', () => {
-  it('presents the configured authority upstream so the remote fence accepts the request', async () => {
-    const { upstream, front } = await startPairWithAuthority('127.0.0.1:41234')
+  it('serves the remote index on the relay origin with a cookie signed for that origin', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
 
-    await fetch(`http://127.0.0.1:${String(front.port)}/api/settings/describe`, { method: 'POST' })
+    const answer = await relayRequest(relay.origin, { path: '/' })
 
-    // The fence compares the Origin host to the Host host; a relay that leaked
-    // the browser's authority here would make them disagree and be refused.
-    expect(upstream.lastHeaders?.host).toBe('127.0.0.1:41234')
-  })
-
-  it('carries the path, method, and body through unchanged', async () => {
-    const { front } = await startPairWithAuthority('127.0.0.1:41235')
-
-    const answer = await fetch(`http://127.0.0.1:${String(front.port)}/api/session/list`, {
-      method: 'POST',
-      body: JSON.stringify({ hello: 'world' }),
-    })
-
-    expect(await answer.json()).toEqual({ url: '/api/session/list', body: '{"hello":"world"}' })
     expect(answer.status).toBe(200)
+    expect(answer.body).toContain('remote-gui')
+    const seen = remote.seen[0]!
+    // The fence compares Origin.host to Host.host, and the cookie is audience-
+    // bound to the authority the browser is on: both must be this relay's own.
+    expect(seen.headers.host).toBe(relay.authority)
+    const [name, value] = seen.headers.cookie!.split('=')
+    expect(name).toBe('dsh-auth-' + createHash('sha256').update(relay.authority).digest('base64url'))
+    const [, body, signature] = value!.split('.')
+    const payload = JSON.parse(Buffer.from(body!, 'base64url').toString('utf8')) as { authority: string }
+    expect(payload.authority).toBe(relay.authority)
+    expect(signature).toBe(createHmac('sha256', SECRET).update(body!).digest('base64url'))
   })
 
-  it('forwards the browser Origin downstream so a same-origin page keeps passing the fence', async () => {
-    const { upstream, front } = await startPairWithAuthority('127.0.0.1:41236')
-    const origin = `http://127.0.0.1:${String(front.port)}`
+  it('serves an API path at the same path rather than stripping a prefix', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
 
-    await fetch(`http://127.0.0.1:${String(front.port)}/api`, { method: 'POST', headers: { origin } })
+    // The remote's own client calls `/api` absolutely, so the relay must serve
+    // it at that path on an origin it owns.
+    await relayRequest(relay.origin, { path: '/api/session/list', method: 'POST' })
 
-    expect(upstream.lastHeaders?.origin).toBe(origin)
+    expect(remote.seen[0]!.url).toBe('/api/session/list')
   })
 
-  it('drops the hop-by-hop headers that describe this hop rather than the request', async () => {
-    const { upstream, front } = await startPairWithAuthority('127.0.0.1:41237')
+  it('forwards a path with its query intact', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
 
-    await fetch(`http://127.0.0.1:${String(front.port)}/api`, {
-      method: 'POST',
-      // Node's own client re-adds `connection`, so the observable proof is the
-      // headers it would otherwise pass through verbatim.
-      headers: { te: 'trailers', 'proxy-authorization': 'secret' },
-    })
+    await relayRequest(relay.origin, { path: '/?token=abc&x=1' })
 
-    expect(upstream.lastHeaders?.te).toBeUndefined()
-    expect(upstream.lastHeaders?.['proxy-authorization']).toBeUndefined()
+    expect(remote.seen[0]!.url).toBe('/?token=abc&x=1')
   })
 
-  it('does not rewrite a response that already started when the tunnel then dies', async () => {
-    // A half-sent response cannot take a new status line; the relay must end it
-    // rather than throw inside the request callback.
-    const server = createServer(() => {})
-    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
-    const upstreamPort = (server.address() as AddressInfo).port
-    await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
+  it('pipes the request body to the remote untouched', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
 
-    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: upstreamPort }, authority: '127.0.0.1:1' })
-    const front = await startFront(relay)
-    open.push(() => front.close())
+    const answer = await relayRequest(relay.origin, { path: '/echo', method: 'POST', body: 'payload-bytes' })
 
-    const answer = await fetch(`http://127.0.0.1:${String(front.port)}/api`).catch(() => undefined)
-    expect(answer?.status).toBe(502)
+    expect(answer.body).toBe('payload-bytes')
   })
 
-  it('ends a response already streaming when the tunnel dies mid-body', async () => {
-    // The upstream answers, sends its headers, then dies: the relay cannot
-    // write a new status line, so it must simply end what it started.
-    const upstream = createServer((_req, res) => {
-      res.writeHead(200, { 'content-type': 'text/plain', 'content-length': '99' })
-      res.write('partial')
-      res.socket?.destroy()
-    })
-    await new Promise<void>((resolve) => { upstream.listen(0, '127.0.0.1', resolve) })
-    const port = (upstream.address() as AddressInfo).port
-    open.push(async () => { await new Promise<void>((resolve) => { upstream.close(() => { resolve() }) }) })
+  it('drops this hop\'s framing headers instead of forwarding them', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
 
-    const front = await startFront(new RemoteRelay({ upstream: { host: '127.0.0.1', port }, authority: '127.0.0.1:1' }))
-    open.push(() => front.close())
+    await relayRequest(relay.origin, { path: '/', headers: { te: 'trailers', 'proxy-authorization': 'secret' } })
 
-    const outcome = await fetch(`http://127.0.0.1:${String(front.port)}/api`).then(
-      r => r.text().then(body => ({ status: r.status, body })).catch(() => ({ status: 'BODY_FAILED' })),
-      () => ({ status: 'FETCH_FAILED' }),
-    )
-    // Node reports the truncated upstream as a request error before the
-    // response callback runs, so the relay answers 502 instead of hanging. Any
-    // of these outcomes is acceptable; what matters is that the relay answered
-    // rather than throwing into the server callback.
-    expect(['BODY_FAILED', 'FETCH_FAILED', 200, 502]).toContain(outcome.status)
+    const seen = remote.seen[0]!
+    expect(seen.headers.te).toBeUndefined()
+    expect(seen.headers['proxy-authorization']).toBeUndefined()
   })
 
-  it('ends a response that already started instead of rewriting its status', async () => {
-    // The relay takes the response as a parameter, so the already-started state
-    // is reachable directly: the upstream errors after the status line is gone,
-    // and a second writeHead would throw.
-    const dead = createServer(() => {})
-    await new Promise<void>((resolve) => { dead.listen(0, '127.0.0.1', resolve) })
-    const port = (dead.address() as AddressInfo).port
-    await new Promise<void>((resolve) => { dead.close(() => { resolve() }) })
+  it('forwards the browser Origin for the relay origin unchanged', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
 
-    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port }, authority: '127.0.0.1:1' })
-    const written: Array<{ status: number }> = []
-    let ended = ''
-    const response = {
-      headersSent: true,
-      writeHead(status: number) { written.push({ status }); return this },
-      end(body?: string) { ended = body ?? ''; return this },
-    }
-    relay.handle(
-      { url: '/api', method: 'POST', headers: {}, pipe() { return this } } as never,
-      response as never,
-    )
+    await relayRequest(relay.origin, { path: '/', headers: { origin: relay.origin, 'sec-fetch-site': 'same-origin' } })
 
-    await new Promise((resolve) => { setTimeout(resolve, 300) })
-    expect(written).toHaveLength(0)
-    expect(ended).toMatch(/remote host unreachable/u)
+    const seen = remote.seen[0]!
+    expect(seen.headers.origin).toBe(relay.origin)
+    expect(seen.headers['sec-fetch-site']).toBe('same-origin')
   })
 
-  it('answers 502 rather than throwing when the tunnel is gone', async () => {
-    const { upstream, front } = await startPair()
-    await upstream.close()
+  it('answers 502 when the remote is unreachable', async () => {
+    const relay = await startRelay(1, SECRET)
 
-    const answer = await fetch(`http://127.0.0.1:${String(front.port)}/api`)
+    const answer = await relayRequest(relay.origin, { path: '/' })
 
     expect(answer.status).toBe(502)
-    expect(await answer.text()).toMatch(/remote host unreachable/u)
+    expect(answer.body).toMatch(/remote host unreachable/u)
+  })
+
+  it('tears the response down when the remote dies mid-body', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, SECRET)
+
+    // A partial body must surface as a broken exchange, never as a silently
+    // complete answer the browser would take for the whole remote response.
+    const outcome = await tornRequest(relay.origin, '/partial')
+
+    expect(outcome.kind).toBe('ABORTED')
+    expect(outcome.body).not.toContain('complete')
+  })
+
+  it('forwards without a cookie when the remote home could not be read', async () => {
+    const remote = await startRemoteHttp()
+    const relay = await startRelay(remote.port, undefined)
+
+    const answer = await relayRequest(relay.origin, { path: '/' })
+
+    // The relay still serves the surface; the remote answers its own refusal.
+    expect(answer.status).toBe(200)
+    expect(remote.seen[0]!.headers.cookie).toBeUndefined()
   })
 })
 
 describe('RemoteRelay upgrade forwarding', () => {
-  it('replays the WebSocket handshake so the remote mux answers 101', async () => {
-    const { upstream, front } = await startPairWithAuthority('127.0.0.1:41238')
+  it('replays the browser handshake to the remote mux with the relay authority and cookie', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, SECRET)
 
-    const status = await new Promise<string>((resolve) => {
-      const socket = netConnect(front.port, '127.0.0.1', () => {
+    const { status } = await relayUpgrade(relay.origin, REMOTE_STREAM_MUX_PATH)
+
+    expect(status).toBe(101)
+    const handshake = await until(() => remote.handshakes[0])
+    expect(handshake).toContain(`GET ${REMOTE_STREAM_MUX_PATH} HTTP/1.1`)
+    expect(handshake).toContain(`host: ${relay.authority}`)
+    expect(handshake).toContain('dsh-auth-')
+    // The upgrade carries the same fence as the HTTP path, so its framing
+    // headers must survive verbatim for the remote to accept the handshake.
+    expect(handshake).toContain('sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==')
+    expect(handshake).toContain('upgrade: websocket')
+  })
+
+  it('streams both directions after the upgrade', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, SECRET)
+    const { socket, received } = await relayUpgrade(relay.origin, REMOTE_STREAM_MUX_PATH)
+    await until(() => received().includes('UPSTREAM-READY') ? true : undefined)
+
+    socket.write('from-browser')
+    await until(() => remote.extra.includes('from-browser') ? true : undefined)
+
+    await until(() => received().includes('from-browser') ? true : undefined)
+  })
+
+  it('forwards bytes that arrived with the browser handshake', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, SECRET)
+    const url = new URL(relay.origin)
+
+    // Send the handshake and one frame together, so the frame lands in `head`.
+    const socket = netConnect(Number(url.port), url.hostname, () => {
+      socket.write([
+        `GET ${REMOTE_STREAM_MUX_PATH} HTTP/1.1`,
+        `host: ${relay.authority}`,
+        'connection: Upgrade',
+        'upgrade: websocket',
+        'sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==',
+        '', 'HEAD-FRAME',
+      ].join('\r\n'))
+    })
+    open.push(socket)
+
+    await until(() => remote.extra.includes('HEAD-FRAME') ? true : undefined)
+  })
+
+  it('joins a repeated header while replaying the handshake', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, SECRET)
+    const url = new URL(relay.origin)
+
+    // Two `set-cookie` lines reach node as an array, unlike most headers.
+    const socket = netConnect(Number(url.port), url.hostname, () => {
+      socket.write([
+        `GET ${REMOTE_STREAM_MUX_PATH} HTTP/1.1`,
+        `host: ${relay.authority}`,
+        'connection: Upgrade',
+        'upgrade: websocket',
+        'sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==',
+        'set-cookie: a=1',
+        'set-cookie: b=2',
+        '', '',
+      ].join('\r\n'))
+    })
+    open.push(socket)
+
+    const handshake = await until(() => remote.handshakes[0])
+    expect(handshake).toContain('set-cookie: a=1, b=2')
+  })
+
+  it('destroys the browser socket when the remote closes the upgrade', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, SECRET)
+    const { socket } = await relayUpgrade(relay.origin, REMOTE_STREAM_MUX_PATH)
+    await until(() => remote.handshakes[0])
+
+    remote.closeUpstreams()
+
+    await once(socket, 'close')
+  })
+
+  it('ends the upstream when the browser socket closes', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, SECRET)
+    const { socket } = await relayUpgrade(relay.origin, REMOTE_STREAM_MUX_PATH)
+    await until(() => remote.handshakes[0])
+
+    socket.destroy()
+
+    await until(() => remote.closedCount() > 0 ? true : undefined)
+  })
+
+  it('ends the upstream when the browser socket errors', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, SECRET)
+    const { socket } = await relayUpgrade(relay.origin, REMOTE_STREAM_MUX_PATH)
+    await until(() => remote.handshakes[0])
+
+    socket.destroy(new Error('browser reset'))
+
+    await until(() => remote.closedCount() > 0 ? true : undefined)
+  })
+
+  it('ends the upstream when the browser socket resets mid-stream', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, SECRET)
+    const url = new URL(relay.origin)
+
+    await new Promise<void>((resolve) => {
+      const socket = netConnect(Number(url.port), url.hostname, () => {
         socket.write([
-          'GET /api/remote.mux HTTP/1.1',
-          `Host: 127.0.0.1:${String(front.port)}`,
-          'Connection: Upgrade',
-          'Upgrade: websocket',
-          'Sec-WebSocket-Version: 13',
-          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+          `GET ${REMOTE_STREAM_MUX_PATH} HTTP/1.1`,
+          `host: ${relay.authority}`,
+          'connection: Upgrade',
+          'upgrade: websocket',
+          'sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==',
           '', '',
         ].join('\r\n'))
       })
-      let buffer = ''
-      socket.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('latin1')
-        if (buffer.includes('\r\n')) { socket.destroy(); resolve(buffer.split('\r\n')[0] ?? '') }
+      socket.on('data', () => {
+        // An abrupt reset is what raises `error` rather than `close`.
+        socket.resetAndDestroy()
+        setTimeout(resolve, 50)
       })
-      socket.on('error', () => { resolve('SOCKET_ERROR') })
-    })
-
-    expect(status).toBe('HTTP/1.1 101 Switching Protocols')
-    // The upgrade path must present the same authority the HTTP path does, or
-    // the fence refuses the handshake even though the request itself is fine.
-    expect(upstream.lastUpgrade).toContain('host=127.0.0.1:41238')
-  })
-
-  it('writes the client bytes already read past the headers on to the upstream', async () => {
-    const { upstream, front } = await startPairWithAuthority('127.0.0.1:41241')
-
-    await new Promise<void>((resolve) => {
-      const socket = netConnect(front.port, '127.0.0.1', () => {
-        // One handshake frame arriving with the request: the relay must forward
-        // the head bytes it was handed, not silently drop them.
-        socket.write([
-          'GET /api/remote.mux HTTP/1.1',
-          `Host: 127.0.0.1:${String(front.port)}`,
-          'Connection: Upgrade',
-          'Upgrade: websocket',
-          'Sec-WebSocket-Key: aGVhZA==',
-          '', 'HEADBYTES',
-        ].join('\r\n'))
-      })
-      socket.on('data', () => { socket.destroy(); resolve() })
       socket.on('error', () => { resolve() })
+      setTimeout(resolve, 1_000)
     })
 
-    expect(upstream.lastUpgrade).toContain('key=aGVhZA==')
+    await until(() => remote.closedCount() > 0 ? true : undefined)
   })
 
-  it('closes the client socket when the upstream half of an upgrade fails', async () => {
-    // The upstream accepts, then drops: the pipe error path must not leave the
-    // client socket open.
-    const server = createServer(() => {})
-    server.on('upgrade', (_req, socket) => { socket.destroy() })
-    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
-    const upstreamPort = (server.address() as AddressInfo).port
-    open.push(async () => { await new Promise<void>((resolve) => { server.close(() => { resolve() }) }) })
+  it('drops the browser socket when the remote is unreachable', async () => {
+    const relay = await startRelay(1, SECRET)
 
-    const front = await startFront(new RemoteRelay({ upstream: { host: '127.0.0.1', port: upstreamPort }, authority: '127.0.0.1:1' }))
-    open.push(() => front.close())
-
-    const closed = await new Promise<boolean>((resolve) => {
-      const socket = netConnect(front.port, '127.0.0.1', () => {
-        socket.write('GET /api/remote.mux HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
-      })
-      socket.on('close', () => { resolve(true) })
-      socket.on('error', () => { resolve(true) })
-      setTimeout(() => { socket.destroy(); resolve(true) }, 3_000)
-    })
-
-    expect(closed).toBe(true)
+    await expect(relayUpgrade(relay.origin, REMOTE_STREAM_MUX_PATH)).rejects.toThrow()
   })
 
-  it('carries the WebSocket key verbatim so the remote can compute its accept value', async () => {
-    const { upstream, front } = await startPairWithAuthority('127.0.0.1:41239')
+  it('forwards an upgrade without a cookie when no secret was readable', async () => {
+    const remote = await startRemoteMux()
+    const relay = await startRelay(remote.port, undefined)
 
-    await new Promise<void>((resolve) => {
-      const socket = netConnect(front.port, '127.0.0.1', () => {
-        socket.write([
-          'GET /api/remote.mux HTTP/1.1',
-          `Host: 127.0.0.1:${String(front.port)}`,
-          'Connection: Upgrade',
-          'Upgrade: websocket',
-          'Sec-WebSocket-Version: 13',
-          'Sec-WebSocket-Key: dmVyaWZ5LXRoaXMta2V5',
-          '', '',
-        ].join('\r\n'))
-      })
-      socket.on('data', () => { socket.destroy(); resolve() })
-      socket.on('error', () => { resolve() })
-    })
+    await relayUpgrade(relay.origin, REMOTE_STREAM_MUX_PATH)
 
-    expect(upstream.lastUpgrade).toContain('key=dmVyaWZ5LXRoaXMta2V5')
+    const handshake = await until(() => remote.handshakes[0])
+    expect(handshake).toContain(`host: ${relay.authority}`)
+    expect(handshake).not.toContain('dsh-auth-')
   })
+})
 
-  it('joins a repeated header rather than dropping it', async () => {
-    const { upstream, front } = await startPairWithAuthority('127.0.0.1:41240')
-
-    await new Promise<void>((resolve) => {
-      const socket = netConnect(front.port, '127.0.0.1', () => {
-        // `set-cookie` is the header node folds into an array; both values must
-        // survive the replay instead of being dropped or stringified as one.
-        socket.write([
-          'GET /api/remote.mux HTTP/1.1',
-          `Host: 127.0.0.1:${String(front.port)}`,
-          'Connection: Upgrade',
-          'Upgrade: websocket',
-          'Set-Cookie: x=1',
-          'Set-Cookie: y=2',
-          'Sec-WebSocket-Key: dGVzdA==',
-          '', '',
-        ].join('\r\n'))
-      })
-      socket.on('data', () => { socket.destroy(); resolve() })
-      socket.on('error', () => { resolve() })
-    })
-
-    expect(upstream.lastUpgrade).toContain('set-cookie=x=1, y=2')
-  })
-
-  it('destroys the client socket when the tunnel is gone', async () => {
-    const { upstream, front } = await startPair()
-    await upstream.close()
-
-    const closed = await new Promise<boolean>((resolve) => {
-      const socket = netConnect(front.port, '127.0.0.1', () => {
-        socket.write('GET /api/remote.mux HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
-      })
-      socket.on('close', () => { resolve(true) })
-      socket.on('error', () => { resolve(true) })
-      setTimeout(() => { socket.destroy(); resolve(true) }, 3_000)
-    })
-
-    expect(closed).toBe(true)
+describe('REMOTE_STREAM_MUX_PATH', () => {
+  it('names the exact pathname the remote gateway upgrades on', () => {
+    expect(REMOTE_STREAM_MUX_PATH).toBe('/api/remote.mux')
   })
 })
