@@ -41,6 +41,21 @@ export interface TunnelRunner {
   check(controlPath: string, target: TunnelTarget, timeoutMs: number): Promise<boolean>
   /** Terminate the master. */
   terminate(child: TunnelChild, timeoutMs: number): Promise<void>
+  /**
+   * Run one command on the remote, reusing the master's authenticated
+   * connection rather than opening a second one.
+   * @param controlPath - the master's control socket.
+   * @param target - the remote endpoint the master is connected to.
+   * @param command - the command to run.
+   * @param timeoutMs - how long the command may take.
+   * @returns the command's stdout, or undefined when it failed.
+   */
+  read(
+    controlPath: string,
+    target: TunnelTarget,
+    command: string,
+    timeoutMs: number,
+  ): Promise<string | undefined>
 }
 
 /** Injectable dependencies and deadlines for one tunnel. */
@@ -65,6 +80,16 @@ export const systemRunner: TunnelRunner = {
         ['-S', controlPath, '-O', 'check', `${target.user}@${target.host}`],
         { timeout: timeoutMs },
         (error) => { resolve(error === null) },
+      )
+    })
+  },
+  async read(controlPath, target, command, timeoutMs) {
+    return await new Promise<string | undefined>((resolve) => {
+      execFile(
+        SSH_EXECUTABLE,
+        ['-S', controlPath, '-p', String(target.port), `${target.user}@${target.host}`, command],
+        { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+        (error, stdout) => { resolve(error === null ? stdout : undefined) },
       )
     })
   },
@@ -105,6 +130,21 @@ export class SshTunnel {
 
   /** The local loopback port this tunnel binds. */
   get localPort(): number { return this.target.localPort }
+
+  /**
+   * Run one command on the remote over this tunnel's authenticated master.
+   *
+   * The master already holds a verified connection, so a read costs no second
+   * credential exchange: the same OpenSSH multiplexing that carries the
+   * forwarded port carries this command.
+   * @param command - the command to run on the remote.
+   * @param timeoutMs - how long the command may take.
+   * @returns the command's stdout, or undefined when it failed or the tunnel is closed.
+   */
+  async read(command: string, timeoutMs: number): Promise<string | undefined> {
+    if (this.closed || this.child === undefined) return undefined
+    return await this.runner.read(this.controlPath, this.target, command, timeoutMs)
+  }
 
   /**
    * Start the master and wait until it answers, so the returned tunnel has a

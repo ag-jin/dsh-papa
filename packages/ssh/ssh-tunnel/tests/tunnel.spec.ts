@@ -60,9 +60,11 @@ const target = { host: 'box.example', port: 22, user: 'jin', remotePort: 3080, l
 function fakeRunner(reachable: () => boolean): {
   runner: TunnelRunner
   spawns: string[][]
+  reads: (string | undefined)[]
   emit: (event: string, ...args: unknown[]) => void
 } {
   const spawns: string[][] = []
+  const reads: (string | undefined)[] = []
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>()
   const child: TunnelChild = {
     pid: 4242,
@@ -77,11 +79,13 @@ function fakeRunner(reachable: () => boolean): {
   }
   return {
     spawns,
+    reads,
     emit: (event, ...args) => { for (const listener of listeners.get(event) ?? []) listener(...args) },
     runner: {
       spawn: (_file, args) => { spawns.push([...args]); return child },
       check: async () => reachable(),
       terminate: async () => {},
+      read: async () => reads.shift(),
     },
   }
 }
@@ -253,6 +257,57 @@ describe('systemRunner', () => {
     expect(child.exitCode !== null || child.signalCode !== null).toBe(true)
   })
 
+  it('runs a remote command through the production seam and returns its output', async () => {
+    const bin = await mkdtemp(join(tmpdir(), 'dsh-ssh-read-'))
+    const previousPath = process.env.PATH
+    try {
+      // A shim stands in for ssh and echoes what it was asked to run.
+      await writeFile(join(bin, 'ssh'), '#!/bin/sh\necho "ran: $*"\n', { mode: 0o755 })
+      await chmod(join(bin, 'ssh'), 0o755)
+      process.env.PATH = `${bin}:${previousPath ?? ''}`
+
+      const output = await systemRunner.read(
+        join(bin, 'master'),
+        { host: 'box.example', port: 2222, user: 'jin', remotePort: 3080, localPort: 51080 },
+        'cat /remote/creds',
+        5_000,
+      )
+
+      expect(output).toContain('ran:')
+      expect(output).toContain('cat /remote/creds')
+      // The read rides the named control socket and the target's own port.
+      expect(output).toContain('-S')
+      expect(output).toContain('2222')
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      await rm(bin, { recursive: true, force: true })
+    }
+  })
+
+  it('reports a failed remote command as undefined rather than throwing', async () => {
+    const bin = await mkdtemp(join(tmpdir(), 'dsh-ssh-read-fail-'))
+    const previousPath = process.env.PATH
+    try {
+      await writeFile(join(bin, 'ssh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+      await chmod(join(bin, 'ssh'), 0o755)
+      process.env.PATH = `${bin}:${previousPath ?? ''}`
+
+      // A nonexistent remote file exits non-zero, which the caller reads as
+      // "no secret here" rather than an error to surface.
+      expect(await systemRunner.read(
+        join(bin, 'master'),
+        { host: 'box.example', port: 2222, user: 'jin', remotePort: 3080, localPort: 51080 },
+        'cat /absent',
+        5_000,
+      )).toBeUndefined()
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      await rm(bin, { recursive: true, force: true })
+    }
+  })
+
   it('returns immediately for a master that already exited', async () => {
     const { child, exited } = realChild('exit 0')
     await exited
@@ -301,5 +356,64 @@ describe('systemRunner', () => {
       if (previousPath === undefined) delete process.env.PATH
       else process.env.PATH = previousPath
     }
+  })
+
+  it('runs a remote command over the master rather than opening a second connection', async () => {
+    const directory = await workspace()
+    const fake = fakeRunner(() => true)
+    fake.reads.push('version: 1\nrecords:\n')
+    const tunnel = new SshTunnel(
+      { host: 'box.example', port: 2222, user: 'jin', remotePort: 3080, localPort: 51080 },
+      'hunter2',
+      { directory, knownHostsPath: join(directory, 'known_hosts'), runner: fake.runner, readyTimeoutMs: 500 },
+    )
+    await tunnel.open()
+
+    expect(await tunnel.read("cat '$HOME/.dsh/.credentials.yaml'", 5_000)).toBe('version: 1\nrecords:\n')
+    // One spawn: the read rode the master the tunnel already opened.
+    expect(fake.spawns).toHaveLength(1)
+  })
+
+  it('reports a failed read as undefined rather than throwing', async () => {
+    const directory = await workspace()
+    const fake = fakeRunner(() => true)
+    fake.reads.push(undefined)
+    const tunnel = new SshTunnel(
+      { host: 'box.example', port: 2222, user: 'jin', remotePort: 3080, localPort: 51080 },
+      'hunter2',
+      { directory, knownHostsPath: join(directory, 'known_hosts'), runner: fake.runner, readyTimeoutMs: 500 },
+    )
+    await tunnel.open()
+
+    expect(await tunnel.read('cat /absent', 5_000)).toBeUndefined()
+  })
+
+  it('refuses to read before the tunnel is open', async () => {
+    const directory = await workspace()
+    const fake = fakeRunner(() => true)
+    fake.reads.push('never returned')
+    const tunnel = new SshTunnel(
+      { host: 'box.example', port: 2222, user: 'jin', remotePort: 3080, localPort: 51080 },
+      'hunter2',
+      { directory, knownHostsPath: join(directory, 'known_hosts'), runner: fake.runner, readyTimeoutMs: 500 },
+    )
+
+    // No master exists yet, so there is no authenticated connection to reuse.
+    expect(await tunnel.read('cat /anything', 5_000)).toBeUndefined()
+  })
+
+  it('refuses to read after the tunnel is closed', async () => {
+    const directory = await workspace()
+    const fake = fakeRunner(() => true)
+    fake.reads.push('stale')
+    const tunnel = new SshTunnel(
+      { host: 'box.example', port: 2222, user: 'jin', remotePort: 3080, localPort: 51080 },
+      'hunter2',
+      { directory, knownHostsPath: join(directory, 'known_hosts'), runner: fake.runner, readyTimeoutMs: 500 },
+    )
+    await tunnel.open()
+    await tunnel.close()
+
+    expect(await tunnel.read('cat /anything', 5_000)).toBeUndefined()
   })
 })
