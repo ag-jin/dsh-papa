@@ -312,7 +312,7 @@ describe('RemoteRelay lifecycle', () => {
   })
 
   it('reports no authority before it is started', () => {
-    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: 1 }, secret: SECRET })
+    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: 1 }, secret: SECRET, port: 51080 })
 
     expect(() => relay.authority).toThrow(/not started/u)
   })
@@ -326,7 +326,9 @@ describe('RemoteRelay lifecycle', () => {
 
   it('releases its origin on close, and closing twice agrees', async () => {
     const remote = await startRemoteHttp()
-    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: remote.port }, secret: SECRET })
+    const relay = new RemoteRelay({
+      upstream: { host: '127.0.0.1', port: remote.port }, secret: SECRET, port: await freePort(),
+    })
     const origin = await relay.start()
 
     await relay.close()
@@ -353,7 +355,7 @@ describe('RemoteRelay lifecycle', () => {
   })
 
   it('closes cleanly when it was never started', async () => {
-    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: 1 }, secret: SECRET })
+    const relay = new RemoteRelay({ upstream: { host: '127.0.0.1', port: 1 }, secret: SECRET, port: 51081 })
 
     await expect(relay.close()).resolves.toBeUndefined()
   })

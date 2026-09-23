@@ -376,6 +376,7 @@ describe('RemoteHostConnections', () => {
       spawn: (_file: string, args: string[]) => { spawns.push([...args]); return child },
       check: async () => ready,
       terminate: async () => undefined,
+      read: async () => undefined,
     }
     return { spawns, runner }
   }
